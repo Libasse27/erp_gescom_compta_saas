@@ -413,12 +413,31 @@ d'endpoints backend manquants pour Super Admin, décisions de pile frontend à
 trancher) :
 
 ```
-7.1  Fondations frontend + pages Auth        — fait (voir ci-dessous)
-7.2  Coquille dashboard Entreprise            — à venir
+7.1  Fondations frontend + pages Auth        — fait
+7.2  Coquille dashboard Entreprise            — fait (voir ci-dessous)
 7.3  Coquille dashboard Super Admin           — à venir (nouveaux endpoints
                                                  de liste requis côté API)
 7.4  Onboarding (assistant + checklist)       — à venir
 ```
+
+> Réalisé (2026-08-09, Phase 7.2) : quatre nouveaux endpoints tenant-scoped,
+> lecture seule — `GET /users/me/context` (permissions de l'utilisateur
+> courant + plan/features, pilote le menu), `GET /users` (liste,
+> `users.manage`), `GET /roles` (liste, `users.manage`, alimente le
+> formulaire d'invitation), `GET /subscriptions/me` (plan/statut courant),
+> `GET /settings` (`settings.manage`). Côté frontend : `/app` a maintenant
+> une vraie coquille — sidebar générée depuis `/users/me/context` (une
+> entrée sans la permission correspondante n'est simplement pas rendue),
+> pages **Utilisateurs** (liste + formulaire d'invitation, réutilise
+> `POST /users/invite`), **Abonnement** (lecture seule) et **Paramètres**
+> (lecture seule). Les sections Clients/Produits/Ventes/Achats/Stocks/
+> Comptabilité/Rapports apparaissent dans le menu (permission déjà
+> accordée par le rôle ADMIN) mais pointent vers un état "à venir" explicite
+> — leur backend est la Phase 8, jamais une fausse page avec des données
+> inventées. Vérifié par un flux HTTP bout en bout réel (inscription →
+> `/users/me/context` → `/roles` → `/users` → `/subscriptions/me` →
+> `/settings`, données cohérentes avec le provisioning de la Phase 6) et un
+> test manuel des pages en conditions réelles.
 
 > Réalisé (2026-08-09, Phase 7.1) : ADR pile frontend + stratégie de session
 > (`docs/adr/0011-...`) — Tailwind + shadcn/ui + TanStack Query,

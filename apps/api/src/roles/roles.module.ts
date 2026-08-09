@@ -1,0 +1,12 @@
+import { Module } from "@nestjs/common";
+import { AuthModule } from "../auth/auth.module";
+import { PermissionsGuard } from "../common/guards/permissions.guard";
+import { RolesController } from "./roles.controller";
+import { RolesService } from "./roles.service";
+
+@Module({
+  imports: [AuthModule],
+  controllers: [RolesController],
+  providers: [RolesService, PermissionsGuard],
+})
+export class RolesModule {}

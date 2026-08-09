@@ -1,28 +1,17 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/session/auth-provider";
 
-// Destination minimale post-connexion : preuve que la boucle
-// login/register → session → page protégée fonctionne de bout en bout. Le
-// vrai dashboard Entreprise (menu Rôle×Permissions×Plan) est la Phase 7.2.
+// Vue générale de l'espace entreprise (docs/SPECIFICATIONS-SAAS.md §14).
+// Les statistiques réelles (ventes, stocks...) arriveront avec les modules
+// ERP correspondants (Phase 8) — rien n'est inventé ici.
 export default function AppHomePage() {
-  const { user, logout } = useAuth();
-  const router = useRouter();
-
-  async function handleLogout() {
-    await logout();
-    router.push("/login");
-  }
+  const { user } = useAuth();
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-4">
-      <p className="text-lg">Bienvenue, {user?.firstName}</p>
-      <p className="text-sm text-muted-foreground">{user?.email}</p>
-      <Button onClick={handleLogout} variant="outline">
-        Se déconnecter
-      </Button>
+    <div className="p-8">
+      <h1 className="text-2xl font-semibold">Bienvenue, {user?.firstName}</h1>
+      <p className="mt-2 text-muted-foreground">{user?.email}</p>
     </div>
   );
 }

@@ -9,6 +9,8 @@ import { NotificationsModule } from "./notifications/notifications.module";
 import { PaymentsModule } from "./payments/payments.module";
 import { PlansModule } from "./plans/plans.module";
 import { ProvisioningModule } from "./provisioning/provisioning.module";
+import { RolesModule } from "./roles/roles.module";
+import { SettingsModule } from "./settings/settings.module";
 import { SubscriptionsModule } from "./subscriptions/subscriptions.module";
 import { TenantModule } from "./tenant/tenant.module";
 import { TenantContextMiddleware } from "./tenant/tenant-context.middleware";
@@ -31,6 +33,8 @@ import { GLOBAL_RATE_LIMIT } from "./common/rate-limit";
     PaymentsModule,
     ProvisioningModule,
     PlansModule,
+    RolesModule,
+    SettingsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
