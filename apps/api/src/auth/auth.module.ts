@@ -5,6 +5,7 @@ import { AccountRecoveryService } from "./account-recovery.service";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { JwtAuthGuard } from "./guards/jwt-auth.guard";
+import { SuperAdminGuard } from "./guards/super-admin.guard";
 import { MfaService } from "./mfa.service";
 import { PasswordService } from "./password.service";
 import { TokenService } from "./token.service";
@@ -16,7 +17,23 @@ import { TokenService } from "./token.service";
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, AccountRecoveryService, PasswordService, TokenService, MfaService, JwtAuthGuard],
-  exports: [AuthService, AccountRecoveryService, PasswordService, TokenService, MfaService, JwtAuthGuard],
+  providers: [
+    AuthService,
+    AccountRecoveryService,
+    PasswordService,
+    TokenService,
+    MfaService,
+    JwtAuthGuard,
+    SuperAdminGuard,
+  ],
+  exports: [
+    AuthService,
+    AccountRecoveryService,
+    PasswordService,
+    TokenService,
+    MfaService,
+    JwtAuthGuard,
+    SuperAdminGuard,
+  ],
 })
 export class AuthModule {}

@@ -4,7 +4,9 @@ import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { PrismaModule } from "./prisma/prisma.module";
 import { AuditLogModule } from "./common/audit/audit-log.module";
 import { AuthModule } from "./auth/auth.module";
+import { EntitlementsModule } from "./entitlements/entitlements.module";
 import { NotificationsModule } from "./notifications/notifications.module";
+import { SubscriptionsModule } from "./subscriptions/subscriptions.module";
 import { TenantModule } from "./tenant/tenant.module";
 import { TenantContextMiddleware } from "./tenant/tenant-context.middleware";
 import { UsersModule } from "./users/users.module";
@@ -20,7 +22,9 @@ import { GLOBAL_RATE_LIMIT } from "./common/rate-limit";
     NotificationsModule,
     AuthModule,
     TenantModule,
+    EntitlementsModule,
     UsersModule,
+    SubscriptionsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

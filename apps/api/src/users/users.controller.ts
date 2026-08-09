@@ -7,6 +7,9 @@ import { PermissionsGuard } from "../common/guards/permissions.guard";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { AuthenticatedUser } from "../auth/types";
+import { WithinLimit } from "../entitlements/decorators/within-limit.decorator";
+import { LimitGuard } from "../entitlements/guards/limit.guard";
+import { SubscriptionAccessGuard } from "../entitlements/guards/subscription-access.guard";
 import { InvitationsService } from "./invitations.service";
 
 function requestMeta(req: Request) {
@@ -18,8 +21,9 @@ export class UsersController {
   constructor(private readonly invitationsService: InvitationsService) {}
 
   @Post("invite")
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @UseGuards(JwtAuthGuard, PermissionsGuard, SubscriptionAccessGuard, LimitGuard)
   @RequirePermission("users.manage")
+  @WithinLimit("users")
   @HttpCode(HttpStatus.CREATED)
   invite(
     @Body(new ZodValidationPipe(inviteUserSchema))

@@ -17,6 +17,11 @@ module.exports = tseslint.config(
       "src/prisma/**",
       "src/auth/**",
       "src/tenant/tenant-scoped-prisma.service.ts",
+      // Seul point d'accès cross-tenant autorisé pour le Super Admin
+      // (docs/CLAUDE.md §5, "CrossTenantRepository explicite, journalisé
+      // dans l'audit log") — volontairement sans RLS, un Super Admin agit
+      // hors de tout tenant.
+      "src/tenant/cross-tenant.repository.ts",
       "src/scripts/**",
       "src/users/invitations.service.ts",
       // AuditLog est écrit aussi bien avant qu'un tenant soit connu (ex:

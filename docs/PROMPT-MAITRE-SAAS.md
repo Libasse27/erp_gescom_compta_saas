@@ -242,11 +242,39 @@ Un **point d'application unique** : un guard `@RequiresFeature('accounting')` /
 
 **Critères d'acceptation**
 
-- [ ] Abonnement expiré → accès en lecture seule ou blocage selon la politique définie, testé.
-- [ ] Dépassement de quota (utilisateurs, produits, stockage) → erreur explicite côté API, testée.
+- [x] Abonnement expiré → accès en lecture seule ou blocage selon la politique définie, testé.
+- [x] Dépassement de quota (utilisateurs, produits, stockage) → erreur explicite côté API, testée.
+      *(seule la limite "users" est exerçable aujourd'hui : aucun module ERP —
+      produits, clients, stockage — n'existe avant la Phase 8, même report
+      que la Phase 3 pour ses points de vigilance non applicables)*
 - [ ] Le frontend masque les modules indisponibles **et** le backend les refuse (les deux testés).
-- [ ] Downgrade avec données au-delà du nouveau quota → comportement défini et testé (pas de perte silencieuse).
-- [ ] Changer un plan côté Super Admin se répercute sans redéploiement.
+      *(backend fait — FeatureGuard/`@RequiresFeature` — mais aucune interface
+      web n'existe avant la Phase 7 ; revisiter à ce moment-là)*
+- [x] Downgrade avec données au-delà du nouveau quota → comportement défini et testé (pas de perte silencieuse).
+- [x] Changer un plan côté Super Admin se répercute sans redéploiement.
+
+> Réalisé (2026-08-09) : `EntitlementsService` (résolution du plan/abonnement
+> courant depuis `TenantContext`, cache mémoire court configurable —
+> `docs/adr/0005-...`), guards `FeatureGuard`/`@RequiresFeature`,
+> `LimitGuard`/`@WithinLimit`, `SubscriptionAccessGuard` — tous **opt-in**,
+> posés explicitement route par route comme `PermissionsGuard` (voir
+> `docs/adr/0009-guards-entitlements-opt-in-pas-globaux.md`, corrigeant un
+> premier essai en guard global qui cassait le logout et d'autres routes
+> hors contexte métier tenant). `POST /users/invite` porte désormais
+> `PermissionsGuard` + `SubscriptionAccessGuard` + `LimitGuard('users')` —
+> seul endpoint d'écriture tenant existant avant la Phase 8.
+> `CrossTenantRepository` (premier usage, connexion d'identité sans RLS,
+> `docs/CLAUDE.md` §5) + `SubscriptionsService.changePlan` +
+> `PATCH /admin/enterprises/:id/subscription` (Super Admin uniquement,
+> `SuperAdminGuard` nouveau) permettent au Super Admin de changer le plan
+> d'une entreprise, tracé dans l'audit log (`CHANGE_PLAN`) et l'historique
+> `SubscriptionEvent`. Migration additive : GRANT SELECT sur le catalogue
+> `plans/features/plan_features/limits/plan_limits` au rôle `erp_app_tenant`
+> (jusqu'ici non accordé), même traitement que `permissions`. Aucun
+> endpoint métier n'utilise encore `@RequiresFeature` (le premier viendra
+> avec les modules ERP, Phase 8) : `FeatureGuard` est testé directement,
+> sans route HTTP, comme le reste des points de vigilance différés faute de
+> module consommateur.
 
 ---
 
