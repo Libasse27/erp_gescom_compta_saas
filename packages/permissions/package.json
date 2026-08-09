@@ -8,13 +8,16 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint --config ../../eslint.config.js src",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "echo \"no tests yet\" && exit 0",
-    "test:tenant": "echo \"no tests yet\" && exit 0"
+    "test": "jest --passWithNoTests",
+    "test:tenant": "jest --passWithNoTests --testPathPattern=\"\\.tenant\\.spec\\.ts$\""
   },
   "dependencies": {
     "@erp/types": "workspace:*"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.13",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
     "typescript": "^5.6.3"
   }
 }
