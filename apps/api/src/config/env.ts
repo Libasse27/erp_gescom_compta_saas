@@ -26,4 +26,13 @@ export const env = {
   // chaque vendeur (identifiants marchands non disponibles à ce stade).
   paymentWebhookSecret: (provider: PaymentProvider) => requireEnv(`PAYMENT_WEBHOOK_SECRET_${provider}`),
   paymentGracePeriodDays: () => Number(process.env.PAYMENT_GRACE_PERIOD_DAYS ?? 7),
+  // Liste blanche stricte (CLAUDE.md §6) — jamais "*". apps/web appelle
+  // l'API directement depuis le navigateur pour les requêtes authentifiées
+  // (Phase 7) ; séparées par virgule pour couvrir plusieurs environnements
+  // (ex: preview Vercel + prod) sans redéploiement de code.
+  corsAllowedOrigins: () =>
+    requireEnv("CORS_ALLOWED_ORIGINS")
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean),
 };

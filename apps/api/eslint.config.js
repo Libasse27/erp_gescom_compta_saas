@@ -45,6 +45,9 @@ module.exports = tseslint.config(
       // exister avant que l'entreprise n'existe (docs/adr/0008-..., même
       // catégorie qu'AuthService/InvitationsService.acceptInvitation).
       "src/provisioning/provisioning.service.ts",
+      // Catalogue plateforme public (Plan), pas tenant-scoped — comme
+      // `permissions`, accessible avant toute authentification.
+      "src/plans/plans.service.ts",
       "**/*.spec.ts",
     ],
     rules: {

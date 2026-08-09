@@ -408,6 +408,37 @@ L'invariant : **aucune entreprise à moitié créée ne doit exister**.
 - [ ] États de chargement, erreurs, listes vides traités partout (pas d'écran blanc).
 - [ ] Accessibilité de base : navigation clavier, labels de formulaires, contrastes.
 
+Phase découpée en sous-phases (trop volumineuse pour un seul passage — liste
+d'endpoints backend manquants pour Super Admin, décisions de pile frontend à
+trancher) :
+
+```
+7.1  Fondations frontend + pages Auth        — fait (voir ci-dessous)
+7.2  Coquille dashboard Entreprise            — à venir
+7.3  Coquille dashboard Super Admin           — à venir (nouveaux endpoints
+                                                 de liste requis côté API)
+7.4  Onboarding (assistant + checklist)       — à venir
+```
+
+> Réalisé (2026-08-09, Phase 7.1) : ADR pile frontend + stratégie de session
+> (`docs/adr/0011-...`) — Tailwind + shadcn/ui + TanStack Query,
+> refresh token en cookie httpOnly posé par des Route Handlers Next.js
+> (`app/api/session/*`), access token en mémoire côté client (jamais
+> `localStorage`). Pages `/login` (+étape MFA), `/register` (wizard 3 étapes
+> en un seul appel API), `/forgot-password`, `/reset-password`,
+> `/verify-email`, destination minimale post-connexion (`/app`, coquille
+> pour la Phase 7.2). Côté API : CORS (liste blanche stricte) + `helmet`
+> (`main.ts`), nouvel endpoint public `GET /plans` (aucun endpoint de liste
+> de forfaits n'existait, nécessaire à l'étape 3 de l'inscription). Vérifié
+> par des tests HTTP bout en bout du flux BFF complet (register → cookie
+> httpOnly posé → refresh avec rotation → logout → refresh après logout
+> rejeté → login → mauvais mot de passe rejeté → email dupliqué rejeté) —
+> la vérification visuelle en navigateur via l'outil d'automatisation n'a
+> pas abouti (l'outil a bloqué sur l'injection de script malgré une page
+> entièrement chargée, voir trace réseau) ; à refaire quand l'outil sera
+> disponible. Bug découvert en marge (`pnpm dev`/`pnpm start` de l'API) :
+> voir Phase 10.
+
 ---
 
 ### PHASE 8 — Migration des modules ERP
@@ -452,6 +483,27 @@ avec `tenantId` corrélé, reverse proxy, HTTPS, stratégie de montée en charge
 - [ ] Un déploiement complet est reproductible depuis zéro sur un environnement vierge.
 - [ ] Une restauration de sauvegarde a été effectuée et vérifiée.
 - [ ] La CI refuse toute PR dont `test:tenant` échoue.
+
+**Bug connu à trancher ici** (découvert Phase 7.1, 2026-08-09) : `pnpm dev`
+et `pnpm start` (apps/api) plantent au démarrage —
+`nest start` exécute `node dist/main.js` directement, et l'exécution
+TypeScript native de Node (déclenchée dès qu'un module workspace comme
+`@erp/validation`/`@erp/permissions` est chargé, ces packages pointant
+`main` vers leur source `.ts` non compilée pour permettre l'édition à chaud)
+exige des extensions `.js` explicites sur les imports relatifs — que ces
+packages n'ont pas. `pnpm test` (ts-jest) et `pnpm build` (compile sans
+exécuter) ne passent jamais par ce chemin, d'où la découverte tardive.
+Options déjà explorées, aucune retenue pour l'instant (décision différée
+ici, chacune nécessite un choix structurant) :
+- ajouter les extensions `.js` dans les packages → casse `ts-node`
+  (`prisma db seed`, `create-super-admin`) qui ne fait pas ce remapping ;
+- basculer le dev vers `tsx watch` → règle le dev mais pas `pnpm start`
+  (production) qui a besoin d'un packaging propre ;
+- builder `webpack` de Nest → nécessite une nouvelle dépendance (`ts-loader`)
+  et change la chaîne de build.
+
+À trancher via un ADR dédié avant la Phase 10, en même temps que la stratégie
+Docker/packaging.
 
 ---
 
