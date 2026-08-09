@@ -4,6 +4,7 @@ import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { PrismaModule } from "./prisma/prisma.module";
 import { AuditLogModule } from "./common/audit/audit-log.module";
 import { AuthModule } from "./auth/auth.module";
+import { NotificationsModule } from "./notifications/notifications.module";
 import { GLOBAL_RATE_LIMIT } from "./common/rate-limit";
 
 @Module({
@@ -13,6 +14,7 @@ import { GLOBAL_RATE_LIMIT } from "./common/rate-limit";
     ThrottlerModule.forRoot([GLOBAL_RATE_LIMIT]),
     PrismaModule,
     AuditLogModule,
+    NotificationsModule,
     AuthModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

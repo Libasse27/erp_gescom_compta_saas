@@ -154,6 +154,7 @@ model User {
   status           UserStatus  @default(PENDING_INVITE)
   mfaEnabled       Boolean     @default(false) @map("mfa_enabled")
   mfaSecret        String?     @map("mfa_secret")
+  emailVerifiedAt  DateTime?   @map("email_verified_at")
   failedLoginCount Int         @default(0) @map("failed_login_count")
   lockedUntil      DateTime?   @map("locked_until")
   lastLoginAt      DateTime?   @map("last_login_at")
