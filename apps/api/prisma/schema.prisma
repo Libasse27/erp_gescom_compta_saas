@@ -113,6 +113,7 @@ enum AuditAction {
   MFA_CHALLENGE_FAILED
   USER_INVITED
   INVITATION_ACCEPTED
+  ENTERPRISE_PROVISIONED
 }
 
 // ACTIVE : jamais utilisé. ROTATED : échangé contre un nouveau token (rotation
@@ -238,6 +239,7 @@ model Enterprise {
   settings       Setting[]
   notifications  Notification[]
   invoiceCounter InvoiceCounter?
+  accounts       Account[]
 
   // NINEA/RCCM uniques par pays, nullables (non exigés à l'inscription,
   // voir docs/SPECIFICATIONS-SAAS.md §7 étape 2 — seul "Nom entreprise" est requis).
@@ -305,6 +307,28 @@ model UserRole {
 
   @@id([userId, roleId])
   @@map("user_roles")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Comptabilité — squelette minimal (Phase 6)
+// ─────────────────────────────────────────────────────────────────────────
+
+// Uniquement les 8 classes racines du plan comptable SYSCOHADA révisé,
+// initialisées au provisioning de chaque entreprise (docs/PROMPT-MAITRE-SAAS.md
+// Phase 6). Le détail des sous-comptes et les écritures comptables sont
+// l'objet du module Comptabilité complet (Phase 8) — volontairement absent
+// ici, ce modèle n'est qu'un point de départ.
+model Account {
+  id           String     @id @default(uuid()) @db.Uuid
+  enterpriseId String     @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
+  code         String
+  label        String
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  @@unique([enterpriseId, code])
+  @@index([enterpriseId])
+  @@map("accounts")
 }
 
 // ─────────────────────────────────────────────────────────────────────────

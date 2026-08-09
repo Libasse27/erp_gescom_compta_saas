@@ -1,9 +1,18 @@
 import { PrismaClient } from "@prisma/client";
 import { PERMISSION_KEYS } from "@erp/permissions";
 
+// Prix indicatifs en FCFA (XOF, entiers) — modifiables ensuite par le Super
+// Admin (docs/SPECIFICATIONS-SAAS.md §8) : jamais codés en dur ailleurs que
+// dans ce seed initial. maxUsers=null => illimité (voir PlanLimit.value).
+const PLANS = [
+  { code: "STARTER", name: "Starter", priceMonthly: 15_000, priceYearly: 150_000, trialDays: 14, sortOrder: 1, maxUsers: 3 },
+  { code: "STANDARD", name: "Standard", priceMonthly: 35_000, priceYearly: 350_000, trialDays: 14, sortOrder: 2, maxUsers: 10 },
+  { code: "PROFESSIONNEL", name: "Professionnel", priceMonthly: 75_000, priceYearly: 750_000, trialDays: 14, sortOrder: 3, maxUsers: 25 },
+  { code: "ENTERPRISE", name: "Entreprise", priceMonthly: 150_000, priceYearly: 1_500_000, trialDays: 14, sortOrder: 4, maxUsers: null as number | null },
+];
+
 // Idempotent : peut être exécuté à chaque déploiement (`prisma db seed`)
-// sans dupliquer ni supprimer de lignes. N'insère que le catalogue global
-// Permission — les Role par entreprise sont créés au provisioning (Phase 6).
+// sans dupliquer ni supprimer de lignes.
 async function main() {
   const prisma = new PrismaClient();
 
@@ -16,6 +25,27 @@ async function main() {
       });
     }
     console.log(`Catalogue de permissions synchronisé (${PERMISSION_KEYS.length} clés).`);
+
+    const usersLimit = await prisma.limit.upsert({
+      where: { key: "users" },
+      create: { key: "users", label: "Utilisateurs" },
+      update: {},
+    });
+
+    for (const planData of PLANS) {
+      const { maxUsers, ...data } = planData;
+      const plan = await prisma.plan.upsert({
+        where: { code: data.code },
+        create: data,
+        update: data,
+      });
+      await prisma.planLimit.upsert({
+        where: { planId_limitId: { planId: plan.id, limitId: usersLimit.id } },
+        create: { planId: plan.id, limitId: usersLimit.id, value: maxUsers },
+        update: { value: maxUsers },
+      });
+    }
+    console.log(`Catalogue de forfaits synchronisé (${PLANS.length} forfaits).`);
   } finally {
     await prisma.$disconnect();
   }

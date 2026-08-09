@@ -41,6 +41,10 @@ module.exports = tseslint.config(
       // l'enterpriseId/subscriptionId contre le Payment déjà en base,
       // jamais depuis le payload du webhook lui-même.
       "src/payments/payments-webhook.service.ts",
+      // Le provisioning crée le tenant lui-même : aucun TenantContext ne peut
+      // exister avant que l'entreprise n'existe (docs/adr/0008-..., même
+      // catégorie qu'AuthService/InvitationsService.acceptInvitation).
+      "src/provisioning/provisioning.service.ts",
       "**/*.spec.ts",
     ],
     rules: {

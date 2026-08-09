@@ -2,3 +2,4 @@
 export * from "./auth";
 export * from "./subscriptions";
 export * from "./payments";
+export * from "./registration";

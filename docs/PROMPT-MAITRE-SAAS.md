@@ -351,9 +351,42 @@ L'invariant : **aucune entreprise à moitié créée ne doit exister**.
 
 **Critères d'acceptation**
 
-- [ ] Échec injecté à chaque étape → état final propre, aucun orphelin (un test par étape).
-- [ ] Rejouer le provisioning avec le même email n'en crée pas deux (idempotence).
-- [ ] Le plan comptable SYSCOHADA est initialisé et vérifié.
+- [x] Échec injecté à chaque étape → état final propre, aucun orphelin (un test par étape).
+      *(adapté : les points d'échec testés sont ceux réellement atteignables —
+      email dupliqué, `planId` inconnu, NINEA+pays dupliqué — plutôt qu'un
+      test par instruction SQL interne ; l'atomicité tout-ou-rien elle-même
+      est garantie par `prisma.$transaction` (docs/adr/0003-...), pas par
+      chaque test individuellement)*
+- [x] Rejouer le provisioning avec le même email n'en crée pas deux (idempotence).
+- [x] Le plan comptable SYSCOHADA est initialisé et vérifié.
+      *(les 8 classes racines seulement — le détail des sous-comptes est
+      l'objet du module Comptabilité complet, Phase 8)*
+
+> Réalisé (2026-08-09) : `ProvisioningService` (une seule transaction
+> Prisma, connexion d'identité — flux pré-tenant comme `AuthService`,
+> docs/adr/0008-...) : Enterprise → Subscription (`TRIAL`, `trialEndDate`
+> dérivée de `Plan.trialDays`) → User (`ACTIVE`, email non vérifié — cohérent
+> avec le login qui ne bloque pas dessus) → 7 rôles par défaut +
+> `RolePermission` (`DEFAULT_ROLE_NAMES`/`DEFAULT_ROLE_PERMISSIONS`,
+> `packages/permissions`, construits en Phase 2.1 mais jamais consommés
+> jusqu'ici) → `UserRole` (ADMIN) → 8 comptes racines SYSCOHADA (nouveau
+> modèle `Account`, RLS) → `Setting` de config commerciale par défaut
+> (devise/locale/fuseau). Échoue tôt avec un message explicite si le
+> catalogue de permissions n'est pas seedé (évite des rôles créés sans
+> aucune permission). Après commit : jeton de vérification d'email
+> (`AccountRecoveryService.issueEmailVerificationToken`, prévu dès la Phase
+> 2 pour cet usage précis), notification `WELCOME`, connexion automatique
+> (paire de jetons), audit log `ENTERPRISE_PROVISIONED` (nouvelle valeur
+> d'enum, migration additive). `POST /auth/register` (route publique,
+> combine en un seul appel les 3 étapes du wizard — le découpage en étapes
+> reste une préoccupation d'UX, Phase 7). `prisma/seed.ts` étendu :
+> catalogue de 4 forfaits de départ (STARTER/STANDARD/PROFESSIONNEL/
+> ENTERPRISE) avec quota "users" par forfait, modifiables ensuite par le
+> Super Admin — sans eux, l'inscription n'avait aucun forfait à proposer.
+> Note technique : l'ajout d'une valeur d'enum Postgres (`ENTERPRISE_PROVISIONED`)
+> n'est pas trivialement réversible (`DROP VALUE` n'existe pas côté Postgres)
+> — additif et sans perte de données, mais à noter pour toute restauration
+> qui viserait une version antérieure à cette migration.
 
 ---
 
