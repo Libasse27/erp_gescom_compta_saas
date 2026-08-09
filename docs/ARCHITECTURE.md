@@ -93,3 +93,11 @@ définition de permission déjà présent dans `packages/`.
   `apps/api/src/prisma/`). `docker/docker-compose.dev.yml` fournit un
   PostgreSQL 16 de développement. Aucune route HTTP, aucun repository/service
   métier, aucune policy RLS à ce stade — c'est l'objet des Phases 2 et 3.
+- **Phase 2** : authentification et RBAC applicatif dans `apps/api/src/auth`,
+  `apps/api/src/users`, `apps/api/src/common/{audit,guards,decorators,validation}`.
+  Login/MFA/refresh rotatif/logout/reset password/vérification email/
+  invitations, `PermissionsGuard` (re-résolution en base à chaque requête),
+  audit log, rate limiting `/auth/*`, seed du catalogue `Permission`, CLI
+  `create-super-admin`. 48 tests d'intégration contre un PostgreSQL de test
+  réel (`test/global-setup.js`). Toujours pas de RLS ni de `TenantContext`
+  (Phase 3), pas de `/auth/register` public (Phase 6), pas d'UI (Phase 7).

@@ -164,11 +164,22 @@ Rôles par défaut (modifiables par l'ADMIN) : `ADMIN`, `COMPTABLE`, `COMMERCIAL
 
 **Critères d'acceptation**
 
-- [ ] Un refresh token réutilisé → toute la famille de tokens est révoquée (test).
-- [ ] Le premier `SUPER_ADMIN` est créé par CLI seedé ; aucune route HTTP ne permet d'obtenir ce rôle (test).
-- [ ] Brute force : blocage après N échecs, testé.
-- [ ] Login/logout/échec de login apparaissent dans l'audit log (test).
+- [x] Un refresh token réutilisé → toute la famille de tokens est révoquée (test).
+- [x] Le premier `SUPER_ADMIN` est créé par CLI seedé ; aucune route HTTP ne permet d'obtenir ce rôle (test).
+- [x] Brute force : blocage après N échecs, testé.
+- [x] Login/logout/échec de login apparaissent dans l'audit log (test).
 - [ ] La page de login **ne comporte aucun bouton « Super Admin »** : la redirection est décidée côté serveur d'après le rôle.
+      *(reporté à la Phase 7 — aucune UI n'existe encore ; le backend garantit déjà qu'aucune route ne permet de choisir/obtenir ce rôle, voir tests ci-dessus)*
+
+> Réalisé (2026-08-09) : `packages/permissions` (catalogue + rôles par défaut),
+> migrations `RefreshToken`/`AuthToken`/verrouillage de compte/`emailVerifiedAt`,
+> `AuthService` (login, refresh rotatif avec détection de réutilisation, logout,
+> `/auth/me`), MFA TOTP obligatoire pour Super Admin, `AccountRecoveryService`
+> (reset password, vérification email), `InvitationsService` +
+> `PermissionsGuard`/`@RequirePermission`, seed du catalogue `Permission`,
+> CLI `create-super-admin`. 48 tests d'intégration (apps/api), suite complète
+> du monorepo verte. Pas de `/auth/register` public (voir note de portée
+> ci-dessus) ; pas de RLS (Phase 3).
 
 ---
 
