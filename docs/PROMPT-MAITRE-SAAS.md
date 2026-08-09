@@ -416,8 +416,36 @@ trancher) :
 7.1  Fondations frontend + pages Auth        — fait
 7.2  Coquille dashboard Entreprise            — fait (voir ci-dessous)
 7.3  Coquille dashboard Super Admin           — fait (voir ci-dessous)
-7.4  Onboarding (assistant + checklist)       — à venir
+7.4  Onboarding (assistant + checklist)       — fait (voir ci-dessous)
 ```
+
+> Réalisé (2026-08-09, Phase 7.4) : les étapes 1-4 du wizard §23
+> (SPECIFICATIONS-SAAS.md) étaient déjà couvertes par `POST /auth/register`
+> (Phase 6/7.1, un seul appel) — cette phase ne construit que les étapes 5-7
+> (Configuration ERP, Inviter vos collaborateurs, Commencer), reprenables
+> après abandon. Nouvelle table tenant `onboarding_states` (1:1 Enterprise,
+> RLS forcée, même pattern qu'`invoice_counters`/`accounts`) ne persistant
+> que `currentStep`/`completedAt` — la checklist elle-même est recalculée en
+> direct à chaque lecture depuis des faits réels (jamais un flag dupliqué qui
+> pourrait diverger : `plan_activated` reflète l'abonnement réellement lié à
+> l'entreprise, etc.), pour ne jamais afficher un état inventé. `GET/PATCH
+> /onboarding` : authentification seule, comme `/subscriptions/me` (pas de
+> permission dédiée, c'est la progression propre à l'entreprise du membre
+> connecté). Les 4 items de la checklist §23 qui dépendent des modules ERP
+> (Premier client/produit/vente, Configuration comptable — Phase 8, pas
+> encore construits) sont affichés **verrouillés** (`available:false,
+> reason:"phase_8"`) plutôt que cochés à tort ou omis. Côté frontend :
+> `OnboardingWizard` sur `/app` (masqué une fois complété), `InviteUserForm`
+> extrait de `/app/users` pour être réutilisé tel quel à l'étape 6 (pas de
+> duplication de formulaire), `OnboardingChecklist` persistante même après
+> complétion du wizard. Vérifié par 7 tests d'intégration API (création
+> paresseuse, avancement, rejet du retour en arrière, complétion, 401) + 1
+> cas ajouté à `tenant-isolation.tenant.spec.ts`, suite complète (130 tests
+> API + 8 tests `test:tenant`, aucune régression), `typecheck`/`lint`/`build`
+> verts sur tout le monorepo, et un flux HTTP bout en bout réel (inscription
+> → GET /onboarding → PATCH step 6 → PATCH completed, `plan_activated`
+> correctement `true` car un abonnement TRIAL existe réellement pour cette
+> entreprise).
 
 > Réalisé (2026-08-09, Phase 7.3) : deux nouveaux endpoints cross-tenant,
 > lecture seule, réservés au Super Admin — `GET /admin/overview`

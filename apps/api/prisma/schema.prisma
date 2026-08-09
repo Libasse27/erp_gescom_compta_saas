@@ -240,6 +240,7 @@ model Enterprise {
   notifications  Notification[]
   invoiceCounter InvoiceCounter?
   accounts       Account[]
+  onboardingState OnboardingState?
 
   // NINEA/RCCM uniques par pays, nullables (non exigés à l'inscription,
   // voir docs/SPECIFICATIONS-SAAS.md §7 étape 2 — seul "Nom entreprise" est requis).
@@ -534,6 +535,20 @@ model InvoiceCounter {
   updatedAt    DateTime   @updatedAt @map("updated_at")
 
   @@map("invoice_counters")
+}
+
+// Progression de l'assistant d'onboarding post-inscription
+// (docs/SPECIFICATIONS-SAAS.md §23). Les étapes 1-4 du wizard sont déjà
+// couvertes par le provisioning (Phase 6) — currentStep démarre donc à 5.
+model OnboardingState {
+  enterpriseId String     @id @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
+  currentStep  Int        @default(5) @map("current_step")
+  completedAt  DateTime?  @map("completed_at")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  @@map("onboarding_states")
 }
 
 // ─────────────────────────────────────────────────────────────────────────

@@ -108,6 +108,20 @@ describe("Tenant isolation (RLS + TenantContext)", () => {
     await prisma.account.deleteMany({ where: { enterpriseId: { in: [enterpriseA.id, enterpriseB.id] } } });
   });
 
+  it("scopes onboarding_states to the current tenant (Phase 7.4, assistant post-inscription)", async () => {
+    const enterpriseA = await createEnterprise(`Tenant A ${randomUUID()}`);
+    const enterpriseB = await createEnterprise(`Tenant B ${randomUUID()}`);
+    await prisma.onboardingState.create({ data: { enterpriseId: enterpriseA.id, currentStep: 6 } });
+    await prisma.onboardingState.create({ data: { enterpriseId: enterpriseB.id, currentStep: 7 } });
+
+    const seenByA = await TenantContext.run({ tenantId: enterpriseA.id, userId: randomUUID(), isSuperAdmin: false }, () =>
+      tenantPrisma.run((tx) => tx.onboardingState.findMany()),
+    );
+    expect(seenByA.map((s) => s.enterpriseId)).toEqual([enterpriseA.id]);
+
+    await prisma.onboardingState.deleteMany({ where: { enterpriseId: { in: [enterpriseA.id, enterpriseB.id] } } });
+  });
+
   it("erp_app_tenant is neither superuser nor RLS-bypassing, and does not own the tenant tables", async () => {
     const [role] = await prisma.$queryRaw<{ rolsuper: boolean; rolbypassrls: boolean }[]>`
       SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'erp_app_tenant'
