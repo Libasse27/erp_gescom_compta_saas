@@ -12,8 +12,11 @@ interface Session {
 }
 
 interface AuthContextValue extends Session {
-  login(email: string, password: string): Promise<{ mfaRequired: true; challengeToken: string } | { mfaRequired: false }>;
-  verifyMfa(challengeToken: string, code: string): Promise<void>;
+  login(
+    email: string,
+    password: string,
+  ): Promise<{ mfaRequired: true; challengeToken: string } | { mfaRequired: false; user: CurrentUser }>;
+  verifyMfa(challengeToken: string, code: string): Promise<{ user: CurrentUser }>;
   register(payload: Record<string, unknown>): Promise<void>;
   logout(): Promise<void>;
 }
@@ -72,7 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { mfaRequired: true, challengeToken: data.challengeToken };
     }
     setSession({ status: "authenticated", user: data.user, accessToken: data.accessToken });
-    return { mfaRequired: false };
+    return { mfaRequired: false, user: data.user };
   };
 
   const verifyMfa: AuthContextValue["verifyMfa"] = async (challengeToken, code) => {
@@ -81,6 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new SessionApiError(extractErrorMessage(data, "Code de vérification invalide"));
     }
     setSession({ status: "authenticated", user: data.user, accessToken: data.accessToken });
+    return { user: data.user };
   };
 
   const register: AuthContextValue["register"] = async (payload) => {

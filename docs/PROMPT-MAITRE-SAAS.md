@@ -415,10 +415,36 @@ trancher) :
 ```
 7.1  Fondations frontend + pages Auth        — fait
 7.2  Coquille dashboard Entreprise            — fait (voir ci-dessous)
-7.3  Coquille dashboard Super Admin           — à venir (nouveaux endpoints
-                                                 de liste requis côté API)
+7.3  Coquille dashboard Super Admin           — fait (voir ci-dessous)
 7.4  Onboarding (assistant + checklist)       — à venir
 ```
+
+> Réalisé (2026-08-09, Phase 7.3) : deux nouveaux endpoints cross-tenant,
+> lecture seule, réservés au Super Admin — `GET /admin/overview`
+> (statistiques plateforme : entreprises actives/suspendues/créées sous 30j,
+> utilisateurs, abonnements actifs/expirés, paiements en attente/échoués,
+> revenu total) et `GET /admin/enterprises` (liste des entreprises + forfait
+> et statut d'abonnement courants). Les deux passent par
+> `CrossTenantRepository` (Prisma identité, hors RLS tenant par construction)
+> et journalisent un événement `CROSS_TENANT_ACCESS` dans l'audit log à
+> chaque appel, conformément à `CLAUDE.md` §6. Côté frontend : nouvelle
+> coquille `/super-admin`, **visuellement distincte** de `/app` (thème sombre,
+> bandeau "SUPER ADMIN"), garde côté client sur `isSuperAdmin` (redirection
+> `/login` si non authentifié, `/app` si authentifié sans le rôle). Pages
+> réelles **Vue générale** (cartes de statistiques) et **Entreprises**
+> (tableau) ; les neuf autres sections du menu (Utilisateurs, Abonnements,
+> Plans, Paiements, Factures, Notifications, Logs, Audit, Paramètres
+> plateforme) affichent un état "à venir" explicite — leur backend reste à
+> construire phase par phase, jamais de données inventées. `/login` redirige
+> désormais vers `/super-admin` ou `/app` selon `isSuperAdmin` (valeur lue
+> directement sur la réponse de connexion, pas sur un état React
+> potentiellement pas encore réhydraté). Vérifié par 7 tests d'intégration
+> API (overview + liste avec données de forfait correctes, 403 pour un
+> non-Super-Admin sur les deux endpoints, 401 non authentifié sur les deux),
+> suite complète (123 tests API + 7 tests `test:tenant`, aucune régression),
+> `typecheck`/`lint`/`build` verts sur tout le monorepo, et test manuel HTTP
+> (401 sans authentification sur `/admin/overview`, toutes les pages
+> `/super-admin/*` compilent et répondent 200).
 
 > Réalisé (2026-08-09, Phase 7.2) : quatre nouveaux endpoints tenant-scoped,
 > lecture seule — `GET /users/me/context` (permissions de l'utilisateur

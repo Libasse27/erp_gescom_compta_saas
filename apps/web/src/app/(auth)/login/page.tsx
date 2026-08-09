@@ -36,7 +36,7 @@ export default function LoginPage() {
         mfaForm.setValue("challengeToken", result.challengeToken);
         return;
       }
-      router.push("/app");
+      router.push(result.user.isSuperAdmin ? "/super-admin" : "/app");
     } catch (error) {
       setFormError(error instanceof SessionApiError ? error.message : "Une erreur est survenue");
     }
@@ -45,8 +45,8 @@ export default function LoginPage() {
   async function onMfaSubmit(values: MfaVerifyInput) {
     setFormError(null);
     try {
-      await verifyMfa(values.challengeToken, values.code);
-      router.push("/app");
+      const { user } = await verifyMfa(values.challengeToken, values.code);
+      router.push(user.isSuperAdmin ? "/super-admin" : "/app");
     } catch (error) {
       setFormError(error instanceof SessionApiError ? error.message : "Une erreur est survenue");
     }

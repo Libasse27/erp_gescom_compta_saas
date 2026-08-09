@@ -58,4 +58,66 @@ export class CrossTenantRepository {
   }): Promise<Payment> {
     return this.prisma.payment.create({ data: { ...data, status: "PENDING" } });
   }
+
+  // Phase 7.3 — vue Super Admin.
+  listEnterprisesWithSubscriptions(): Promise<
+    (Enterprise & { currentSubscription: (Subscription & { plan: Plan }) | null })[]
+  > {
+    return this.prisma.enterprise.findMany({
+      include: { currentSubscription: { include: { plan: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  async getPlatformOverview(): Promise<{
+    totalEnterprises: number;
+    activeEnterprises: number;
+    suspendedEnterprises: number;
+    newEnterprisesLast30Days: number;
+    totalUsers: number;
+    activeSubscriptions: number;
+    expiredSubscriptions: number;
+    pendingPayments: number;
+    failedPayments: number;
+    totalRevenue: number;
+  }> {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3_600_000);
+
+    const [
+      totalEnterprises,
+      activeEnterprises,
+      suspendedEnterprises,
+      newEnterprisesLast30Days,
+      totalUsers,
+      activeSubscriptions,
+      expiredSubscriptions,
+      pendingPayments,
+      failedPayments,
+      revenue,
+    ] = await Promise.all([
+      this.prisma.enterprise.count(),
+      this.prisma.enterprise.count({ where: { status: "ACTIVE" } }),
+      this.prisma.enterprise.count({ where: { status: "SUSPENDED" } }),
+      this.prisma.enterprise.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
+      this.prisma.user.count({ where: { enterpriseId: { not: null } } }),
+      this.prisma.enterprise.count({ where: { currentSubscription: { status: "ACTIVE" } } }),
+      this.prisma.enterprise.count({ where: { currentSubscription: { status: "EXPIRED" } } }),
+      this.prisma.payment.count({ where: { status: "PENDING" } }),
+      this.prisma.payment.count({ where: { status: "FAILED" } }),
+      this.prisma.payment.aggregate({ where: { status: "SUCCEEDED" }, _sum: { amount: true } }),
+    ]);
+
+    return {
+      totalEnterprises,
+      activeEnterprises,
+      suspendedEnterprises,
+      newEnterprisesLast30Days,
+      totalUsers,
+      activeSubscriptions,
+      expiredSubscriptions,
+      pendingPayments,
+      failedPayments,
+      totalRevenue: revenue._sum.amount ?? 0,
+    };
+  }
 }
