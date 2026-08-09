@@ -104,6 +104,34 @@ enum AuditAction {
   REACTIVATE_ACCOUNT
   EXPORT_DATA
   CROSS_TENANT_ACCESS
+  ACCOUNT_LOCKED
+  REFRESH_TOKEN_REUSE_DETECTED
+  PASSWORD_RESET_REQUESTED
+  PASSWORD_RESET_COMPLETED
+  EMAIL_VERIFIED
+  MFA_ENABLED
+  MFA_CHALLENGE_FAILED
+  USER_INVITED
+  INVITATION_ACCEPTED
+}
+
+// ACTIVE : jamais utilisé. ROTATED : échangé contre un nouveau token (rotation
+// normale). REVOKED : famille entière invalidée (logout, ou réutilisation
+// détectée — CLAUDE.md §6). Présenter un token ROTATED ou REVOKED déclenche
+// la révocation de toute la famille.
+enum RefreshTokenStatus {
+  ACTIVE
+  ROTATED
+  REVOKED
+}
+
+// Une seule table pour trois usages proches (évite 3 tables quasi
+// identiques) : vérification email, réinitialisation mot de passe,
+// invitation utilisateur.
+enum AuthTokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+  INVITATION
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -114,48 +142,91 @@ enum AuditAction {
 // constraint SQL dans la migration (non exprimable dans le DSL Prisma),
 // voir docs/adr/0004-modele-identite.md. Jamais modifiable via une route API.
 model User {
-  id           String     @id @default(uuid()) @db.Uuid
-  email        String     @unique
-  passwordHash String     @map("password_hash")
-  firstName    String     @map("first_name")
-  lastName     String     @map("last_name")
-  phone        String?
-  enterpriseId String?    @map("enterprise_id") @db.Uuid
-  enterprise   Enterprise? @relation(fields: [enterpriseId], references: [id])
-  isSuperAdmin Boolean    @default(false) @map("is_super_admin")
-  status       UserStatus @default(PENDING_INVITE)
-  mfaEnabled   Boolean    @default(false) @map("mfa_enabled")
-  mfaSecret    String?    @map("mfa_secret")
-  lastLoginAt  DateTime?  @map("last_login_at")
-  createdAt    DateTime   @default(now()) @map("created_at")
-  updatedAt    DateTime   @updatedAt @map("updated_at")
+  id               String      @id @default(uuid()) @db.Uuid
+  email            String      @unique
+  passwordHash     String      @map("password_hash")
+  firstName        String      @map("first_name")
+  lastName         String      @map("last_name")
+  phone            String?
+  enterpriseId     String?     @map("enterprise_id") @db.Uuid
+  enterprise       Enterprise? @relation(fields: [enterpriseId], references: [id])
+  isSuperAdmin     Boolean     @default(false) @map("is_super_admin")
+  status           UserStatus  @default(PENDING_INVITE)
+  mfaEnabled       Boolean     @default(false) @map("mfa_enabled")
+  mfaSecret        String?     @map("mfa_secret")
+  failedLoginCount Int         @default(0) @map("failed_login_count")
+  lockedUntil      DateTime?   @map("locked_until")
+  lastLoginAt      DateTime?   @map("last_login_at")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
 
   userRoles     UserRole[]
   auditLogs     AuditLog[]
   notifications Notification[]
+  refreshTokens RefreshToken[]
+  authTokens    AuthToken[]
 
   @@index([enterpriseId])
   @@map("users")
 }
 
+// Rotation avec détection de réutilisation (CLAUDE.md §6) : à chaque refresh,
+// le token présenté passe ACTIVE → ROTATED et un nouveau token ACTIVE est
+// créé dans la même familyId. Si un token ROTATED ou REVOKED est présenté à
+// nouveau, c'est un signe de vol : toute la famille (familyId) est révoquée.
+model RefreshToken {
+  id                String             @id @default(uuid()) @db.Uuid
+  userId            String             @map("user_id") @db.Uuid
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  familyId          String             @map("family_id") @db.Uuid
+  tokenHash         String             @unique @map("token_hash")
+  status            RefreshTokenStatus @default(ACTIVE)
+  expiresAt         DateTime           @map("expires_at")
+  replacedByTokenId String?            @map("replaced_by_token_id") @db.Uuid
+  createdAt         DateTime           @default(now()) @map("created_at")
+  revokedAt         DateTime?          @map("revoked_at")
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+// Jetons à usage unique (vérification email, reset password, invitation).
+// tokenHash uniquement : le token en clair n'est jamais persisté, seul son
+// hash l'est (comme un mot de passe), pour qu'une fuite de la base ne
+// permette pas de rejouer un lien de reset/invitation.
+model AuthToken {
+  id         String        @id @default(uuid()) @db.Uuid
+  userId     String        @map("user_id") @db.Uuid
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       AuthTokenType
+  tokenHash  String        @unique @map("token_hash")
+  expiresAt  DateTime      @map("expires_at")
+  consumedAt DateTime?     @map("consumed_at")
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  @@index([userId, type])
+  @@map("auth_tokens")
+}
+
 model Enterprise {
-  id                    String            @id @default(uuid()) @db.Uuid
+  id                    String           @id @default(uuid()) @db.Uuid
   name                  String
-  legalName             String?           @map("legal_name")
+  legalName             String?          @map("legal_name")
   ninea                 String?
   rccm                  String?
   address               String?
   city                  String?
-  country               String            @default("SN")
+  country               String           @default("SN")
   phone                 String?
   email                 String?
-  currency              String            @default("XOF")
+  currency              String           @default("XOF")
   sector                String?
-  status                EnterpriseStatus  @default(ACTIVE)
-  currentSubscriptionId String?           @unique @map("current_subscription_id") @db.Uuid
-  currentSubscription   Subscription?     @relation("EnterpriseCurrentSubscription", fields: [currentSubscriptionId], references: [id])
-  createdAt             DateTime          @default(now()) @map("created_at")
-  updatedAt             DateTime          @updatedAt @map("updated_at")
+  status                EnterpriseStatus @default(ACTIVE)
+  currentSubscriptionId String?          @unique @map("current_subscription_id") @db.Uuid
+  currentSubscription   Subscription?    @relation("EnterpriseCurrentSubscription", fields: [currentSubscriptionId], references: [id])
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @updatedAt @map("updated_at")
 
   users         User[]
   roles         Role[]
@@ -182,13 +253,13 @@ model Enterprise {
 // Il n'y a pas de "rôle SUPER_ADMIN" ici : le Super Admin est identifié par
 // User.isSuperAdmin, pas par le système RBAC tenant.
 model Role {
-  id           String   @id @default(uuid()) @db.Uuid
-  enterpriseId String   @map("enterprise_id") @db.Uuid
+  id           String     @id @default(uuid()) @db.Uuid
+  enterpriseId String     @map("enterprise_id") @db.Uuid
   enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
   name         String
-  isSystem     Boolean  @default(false) @map("is_system")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  isSystem     Boolean    @default(false) @map("is_system")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
 
   rolePermissions RolePermission[]
   userRoles       UserRole[]
@@ -213,11 +284,11 @@ model Permission {
 }
 
 model RolePermission {
-  roleId       String   @map("role_id") @db.Uuid
-  permissionId String   @map("permission_id") @db.Uuid
+  roleId       String     @map("role_id") @db.Uuid
+  permissionId String     @map("permission_id") @db.Uuid
   role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
   permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-  createdAt    DateTime @default(now()) @map("created_at")
+  createdAt    DateTime   @default(now()) @map("created_at")
 
   @@id([roleId, permissionId])
   @@map("role_permissions")
@@ -319,20 +390,20 @@ model PlanLimit {
 // machine à états de apps/api/src/subscriptions/subscription-state-machine.ts
 // (packages/types en expose le contrat).
 model Subscription {
-  id                 String              @id @default(uuid()) @db.Uuid
-  enterpriseId       String              @map("enterprise_id") @db.Uuid
-  enterprise         Enterprise          @relation("EnterpriseSubscriptions", fields: [enterpriseId], references: [id])
-  planId             String              @map("plan_id") @db.Uuid
-  plan               Plan                @relation(fields: [planId], references: [id])
-  status             SubscriptionStatus  @default(TRIAL)
-  startDate          DateTime            @map("start_date")
-  endDate            DateTime?           @map("end_date")
-  trialEndDate       DateTime?           @map("trial_end_date")
-  renewalDate        DateTime?           @map("renewal_date")
-  cancelledAt        DateTime?           @map("cancelled_at")
-  cancellationReason String?             @map("cancellation_reason")
-  createdAt          DateTime            @default(now()) @map("created_at")
-  updatedAt          DateTime            @updatedAt @map("updated_at")
+  id                 String             @id @default(uuid()) @db.Uuid
+  enterpriseId       String             @map("enterprise_id") @db.Uuid
+  enterprise         Enterprise         @relation("EnterpriseSubscriptions", fields: [enterpriseId], references: [id])
+  planId             String             @map("plan_id") @db.Uuid
+  plan               Plan               @relation(fields: [planId], references: [id])
+  status             SubscriptionStatus @default(TRIAL)
+  startDate          DateTime           @map("start_date")
+  endDate            DateTime?          @map("end_date")
+  trialEndDate       DateTime?          @map("trial_end_date")
+  renewalDate        DateTime?          @map("renewal_date")
+  cancelledAt        DateTime?          @map("cancelled_at")
+  cancellationReason String?            @map("cancellation_reason")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
 
   events               SubscriptionEvent[]
   payments             Payment[]
@@ -369,22 +440,22 @@ model SubscriptionEvent {
 // ─────────────────────────────────────────────────────────────────────────
 
 model Payment {
-  id                String           @id @default(uuid()) @db.Uuid
-  enterpriseId      String           @map("enterprise_id") @db.Uuid
-  enterprise        Enterprise       @relation(fields: [enterpriseId], references: [id])
-  subscriptionId    String?          @map("subscription_id") @db.Uuid
-  subscription      Subscription?    @relation(fields: [subscriptionId], references: [id])
-  invoiceId         String?          @map("invoice_id") @db.Uuid
-  invoice           Invoice?         @relation(fields: [invoiceId], references: [id])
+  id                String          @id @default(uuid()) @db.Uuid
+  enterpriseId      String          @map("enterprise_id") @db.Uuid
+  enterprise        Enterprise      @relation(fields: [enterpriseId], references: [id])
+  subscriptionId    String?         @map("subscription_id") @db.Uuid
+  subscription      Subscription?   @relation(fields: [subscriptionId], references: [id])
+  invoiceId         String?         @map("invoice_id") @db.Uuid
+  invoice           Invoice?        @relation(fields: [invoiceId], references: [id])
   provider          PaymentProvider
-  providerReference String?          @map("provider_reference")
+  providerReference String?         @map("provider_reference")
   amount            Int
-  currency          String           @default("XOF")
-  status            PaymentStatus    @default(PENDING)
-  paidAt            DateTime?        @map("paid_at")
+  currency          String          @default("XOF")
+  status            PaymentStatus   @default(PENDING)
+  paidAt            DateTime?       @map("paid_at")
   metadata          Json?
-  createdAt         DateTime         @default(now()) @map("created_at")
-  updatedAt         DateTime         @updatedAt @map("updated_at")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
 
   // Idempotence webhook (Phase 5) : une référence donnée chez un fournisseur
   // ne peut créer qu'un seul paiement.
