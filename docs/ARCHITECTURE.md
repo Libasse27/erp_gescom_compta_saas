@@ -85,6 +85,11 @@ définition de permission déjà présent dans `packages/`.
 
 ## 5. État actuel
 
-Scaffolding uniquement (Phase 0) : structure, outillage (typecheck/lint/test/
-build), aucune entité de domaine ni route métier. Le schéma de domaine SaaS
-(`User`, `Enterprise`, `Plan`, `Subscription`, …) est l'objet de la Phase 1.
+- **Phase 0** : scaffolding (structure, outillage typecheck/lint/test/build).
+- **Phase 1** : schéma de domaine SaaS complet (`User`, `Enterprise`, RBAC,
+  `Plan`/`Feature`/`Limit`, `Subscription`, `Payment`/`Invoice`, `AuditLog`,
+  `Setting`, `Notification`) — voir `docs/database/SCHEMA.md`. Prisma est
+  intégré à `apps/api` (`apps/api/prisma/schema.prisma`,
+  `apps/api/src/prisma/`). `docker/docker-compose.dev.yml` fournit un
+  PostgreSQL 16 de développement. Aucune route HTTP, aucun repository/service
+  métier, aucune policy RLS à ce stade — c'est l'objet des Phases 2 et 3.

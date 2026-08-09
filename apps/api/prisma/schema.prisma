@@ -1,0 +1,481 @@
+// Schéma de domaine SaaS — Phase 1 (docs/PROMPT-MAITRE-SAAS.md).
+// Entités plateforme uniquement : aucun module ERP (clients, produits,
+// ventes...) n'est modélisé ici, voir Phase 8.
+//
+// Isolation tenant : les colonnes enterpriseId sont posées dès maintenant,
+// mais les policies Row Level Security PostgreSQL (docs/adr/0002-...) sont
+// ajoutées en Phase 3, pas ici.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────
+
+enum UserStatus {
+  PENDING_INVITE
+  ACTIVE
+  SUSPENDED
+}
+
+enum EnterpriseStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+// Distinct de EnterpriseStatus : une entreprise ACTIVE peut avoir un
+// abonnement PAST_DUE (docs/PROMPT-MAITRE-SAAS.md, Phase 1).
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  SUSPENDED
+  CANCELLED
+  EXPIRED
+}
+
+enum PaymentProvider {
+  WAVE
+  ORANGE_MONEY
+  FREE_MONEY
+  STRIPE
+  CARD
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  VOID
+}
+
+enum SettingScope {
+  PLATFORM
+  ENTERPRISE
+}
+
+enum NotificationType {
+  WELCOME
+  PAYMENT_CONFIRMED
+  PAYMENT_FAILED
+  SUBSCRIPTION_EXPIRING
+  SUBSCRIPTION_EXPIRED
+  NEW_USER
+  USER_INVITATION
+  ENTERPRISE_SUSPENDED
+  PLAN_CHANGED
+}
+
+enum NotificationChannel {
+  EMAIL
+  IN_APP
+  SMS
+}
+
+enum AuditAction {
+  LOGIN
+  LOGOUT
+  LOGIN_FAILED
+  CREATE_USER
+  UPDATE_USER
+  DELETE_USER
+  CHANGE_ROLE
+  CREATE_INVOICE
+  UPDATE_PRODUCT
+  DELETE_CLIENT
+  CHANGE_PLAN
+  PAYMENT
+  SUSPEND_ACCOUNT
+  REACTIVATE_ACCOUNT
+  EXPORT_DATA
+  CROSS_TENANT_ACCESS
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Identité — User / Enterprise
+// ─────────────────────────────────────────────────────────────────────────
+
+// isSuperAdmin = true <=> enterpriseId IS NULL : invariant posé en CHECK
+// constraint SQL dans la migration (non exprimable dans le DSL Prisma),
+// voir docs/adr/0004-modele-identite.md. Jamais modifiable via une route API.
+model User {
+  id           String     @id @default(uuid()) @db.Uuid
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  firstName    String     @map("first_name")
+  lastName     String     @map("last_name")
+  phone        String?
+  enterpriseId String?    @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise? @relation(fields: [enterpriseId], references: [id])
+  isSuperAdmin Boolean    @default(false) @map("is_super_admin")
+  status       UserStatus @default(PENDING_INVITE)
+  mfaEnabled   Boolean    @default(false) @map("mfa_enabled")
+  mfaSecret    String?    @map("mfa_secret")
+  lastLoginAt  DateTime?  @map("last_login_at")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  userRoles     UserRole[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+
+  @@index([enterpriseId])
+  @@map("users")
+}
+
+model Enterprise {
+  id                    String            @id @default(uuid()) @db.Uuid
+  name                  String
+  legalName             String?           @map("legal_name")
+  ninea                 String?
+  rccm                  String?
+  address               String?
+  city                  String?
+  country               String            @default("SN")
+  phone                 String?
+  email                 String?
+  currency              String            @default("XOF")
+  sector                String?
+  status                EnterpriseStatus  @default(ACTIVE)
+  currentSubscriptionId String?           @unique @map("current_subscription_id") @db.Uuid
+  currentSubscription   Subscription?     @relation("EnterpriseCurrentSubscription", fields: [currentSubscriptionId], references: [id])
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
+
+  users         User[]
+  roles         Role[]
+  subscriptions Subscription[] @relation("EnterpriseSubscriptions")
+  payments      Payment[]
+  invoices      Invoice[]
+  auditLogs     AuditLog[]
+  settings      Setting[]
+  notifications Notification[]
+
+  // NINEA/RCCM uniques par pays, nullables (non exigés à l'inscription,
+  // voir docs/SPECIFICATIONS-SAAS.md §7 étape 2 — seul "Nom entreprise" est requis).
+  @@unique([ninea, country])
+  @@unique([rccm, country])
+  @@map("enterprises")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// RBAC — Role / Permission / UserRole (docs/SPECIFICATIONS-SAAS.md §12)
+// ─────────────────────────────────────────────────────────────────────────
+
+// Un Role appartient toujours à une Enterprise (les 7 rôles par défaut sont
+// seedés par entreprise en Phase 6, puis librement renommés/modifiés).
+// Il n'y a pas de "rôle SUPER_ADMIN" ici : le Super Admin est identifié par
+// User.isSuperAdmin, pas par le système RBAC tenant.
+model Role {
+  id           String   @id @default(uuid()) @db.Uuid
+  enterpriseId String   @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
+  name         String
+  isSystem     Boolean  @default(false) @map("is_system")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+
+  @@unique([enterpriseId, name])
+  @@index([enterpriseId])
+  @@map("roles")
+}
+
+// Catalogue plateforme, partagé par tous les tenants (ex: "clients.read").
+// Source de vérité dupliquée dans packages/permissions (Phase 2) pour le
+// typage compile-time des guards ; cette table est l'autorité runtime.
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String   @map("role_id") @db.Uuid
+  permissionId String   @map("permission_id") @db.Uuid
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  userId    String   @map("user_id") @db.Uuid
+  roleId    String   @map("role_id") @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Plans, Features, Limites (docs/SPECIFICATIONS-SAAS.md §8, §21)
+// ─────────────────────────────────────────────────────────────────────────
+
+model Plan {
+  id           String   @id @default(uuid()) @db.Uuid
+  code         String   @unique
+  name         String
+  description  String?
+  priceMonthly Int      @map("price_monthly")
+  priceYearly  Int?     @map("price_yearly")
+  trialDays    Int      @default(0) @map("trial_days")
+  isActive     Boolean  @default(true) @map("is_active")
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  planFeatures  PlanFeature[]
+  planLimits    PlanLimit[]
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+// Catalogue de features booléennes, plateforme. L'association à un plan
+// (PlanFeature) est éditable en base par le Super Admin — jamais codée en
+// dur côté frontend ni backend (docs/adr/0005-stockage-entitlements.md).
+model Feature {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  label       String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  planFeatures PlanFeature[]
+
+  @@map("features")
+}
+
+model PlanFeature {
+  planId    String  @map("plan_id") @db.Uuid
+  featureId String  @map("feature_id") @db.Uuid
+  enabled   Boolean @default(false)
+  plan      Plan    @relation(fields: [planId], references: [id], onDelete: Cascade)
+  feature   Feature @relation(fields: [featureId], references: [id], onDelete: Cascade)
+
+  @@id([planId, featureId])
+  @@map("plan_features")
+}
+
+// Catalogue de limites chiffrées (quotas). Même logique que Feature.
+model Limit {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  label       String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  planLimits PlanLimit[]
+
+  @@map("limits")
+}
+
+// value = NULL signifie "illimité".
+model PlanLimit {
+  planId  String @map("plan_id") @db.Uuid
+  limitId String @map("limit_id") @db.Uuid
+  value   Int?
+  plan    Plan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+  limit   Limit  @relation(fields: [limitId], references: [id], onDelete: Cascade)
+
+  @@id([planId, limitId])
+  @@map("plan_limits")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Abonnement (docs/SPECIFICATIONS-SAAS.md §9, docs/PROMPT-MAITRE-SAAS.md Phase 1)
+// ─────────────────────────────────────────────────────────────────────────
+
+// Historique complet : une Enterprise a plusieurs Subscription au fil du
+// temps (renouvellements, changements de plan) ; Enterprise.currentSubscription
+// pointe vers celle en cours. Les transitions de statut sont validées par la
+// machine à états de apps/api/src/subscriptions/subscription-state-machine.ts
+// (packages/types en expose le contrat).
+model Subscription {
+  id                 String              @id @default(uuid()) @db.Uuid
+  enterpriseId       String              @map("enterprise_id") @db.Uuid
+  enterprise         Enterprise          @relation("EnterpriseSubscriptions", fields: [enterpriseId], references: [id])
+  planId             String              @map("plan_id") @db.Uuid
+  plan               Plan                @relation(fields: [planId], references: [id])
+  status             SubscriptionStatus  @default(TRIAL)
+  startDate          DateTime            @map("start_date")
+  endDate            DateTime?           @map("end_date")
+  trialEndDate       DateTime?           @map("trial_end_date")
+  renewalDate        DateTime?           @map("renewal_date")
+  cancelledAt        DateTime?           @map("cancelled_at")
+  cancellationReason String?             @map("cancellation_reason")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  events               SubscriptionEvent[]
+  payments             Payment[]
+  invoices             Invoice[]
+  currentForEnterprise Enterprise?         @relation("EnterpriseCurrentSubscription")
+
+  @@index([enterpriseId])
+  @@map("subscriptions")
+}
+
+// Log immuable (append-only) de chaque transition de statut ou changement de
+// plan — la facturation passée n'est jamais réécrite (docs/PROMPT-MAITRE-SAAS.md
+// Phase 1, point de vigilance SubscriptionHistory).
+model SubscriptionEvent {
+  id                String              @id @default(uuid()) @db.Uuid
+  subscriptionId    String              @map("subscription_id") @db.Uuid
+  subscription      Subscription        @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  fromStatus        SubscriptionStatus? @map("from_status")
+  toStatus          SubscriptionStatus  @map("to_status")
+  fromPlanId        String?             @map("from_plan_id") @db.Uuid
+  toPlanId          String?             @map("to_plan_id") @db.Uuid
+  reason            String?
+  triggeredByUserId String?             @map("triggered_by_user_id") @db.Uuid
+  createdAt         DateTime            @default(now()) @map("created_at")
+
+  @@index([subscriptionId])
+  @@map("subscription_events")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Paiement et facturation SaaS — l'entreprise paie la plateforme.
+// À ne pas confondre avec les factures que l'entreprise émet à SES clients
+// (module ERP "Facturation", tenant-scoped, Phase 8).
+// ─────────────────────────────────────────────────────────────────────────
+
+model Payment {
+  id                String           @id @default(uuid()) @db.Uuid
+  enterpriseId      String           @map("enterprise_id") @db.Uuid
+  enterprise        Enterprise       @relation(fields: [enterpriseId], references: [id])
+  subscriptionId    String?          @map("subscription_id") @db.Uuid
+  subscription      Subscription?    @relation(fields: [subscriptionId], references: [id])
+  invoiceId         String?          @map("invoice_id") @db.Uuid
+  invoice           Invoice?         @relation(fields: [invoiceId], references: [id])
+  provider          PaymentProvider
+  providerReference String?          @map("provider_reference")
+  amount            Int
+  currency          String           @default("XOF")
+  status            PaymentStatus    @default(PENDING)
+  paidAt            DateTime?        @map("paid_at")
+  metadata          Json?
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+
+  // Idempotence webhook (Phase 5) : une référence donnée chez un fournisseur
+  // ne peut créer qu'un seul paiement.
+  @@unique([provider, providerReference])
+  @@index([enterpriseId])
+  @@index([invoiceId])
+  @@map("payments")
+}
+
+model Invoice {
+  id             String        @id @default(uuid()) @db.Uuid
+  enterpriseId   String        @map("enterprise_id") @db.Uuid
+  enterprise     Enterprise    @relation(fields: [enterpriseId], references: [id])
+  subscriptionId String?       @map("subscription_id") @db.Uuid
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+  number         String        @unique
+  amount         Int
+  status         InvoiceStatus @default(DRAFT)
+  issuedAt       DateTime?     @map("issued_at")
+  dueAt          DateTime?     @map("due_at")
+  paidAt         DateTime?     @map("paid_at")
+  pdfUrl         String?       @map("pdf_url")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  payments Payment[]
+
+  @@index([enterpriseId])
+  @@map("invoices")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Audit, paramètres, notifications
+// ─────────────────────────────────────────────────────────────────────────
+
+// Append-only : aucune mise à jour ni suppression au niveau applicatif
+// (docs/CLAUDE.md §6). enterpriseId/userId nullables pour les actions
+// purement plateforme (ex: Super Admin modifiant un paramètre global).
+model AuditLog {
+  id           String      @id @default(uuid()) @db.Uuid
+  userId       String?     @map("user_id") @db.Uuid
+  user         User?       @relation(fields: [userId], references: [id])
+  enterpriseId String?     @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise? @relation(fields: [enterpriseId], references: [id])
+  action       AuditAction
+  resource     String
+  resourceId   String?     @map("resource_id")
+  ipAddress    String?     @map("ip_address")
+  userAgent    String?     @map("user_agent")
+  metadata     Json?
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  @@index([enterpriseId])
+  @@index([userId])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+// scope=PLATFORM => enterpriseId NULL ; scope=ENTERPRISE => enterpriseId requis
+// (invariant applicatif, comme pour User.isSuperAdmin).
+model Setting {
+  id              String       @id @default(uuid()) @db.Uuid
+  scope           SettingScope
+  enterpriseId    String?      @map("enterprise_id") @db.Uuid
+  enterprise      Enterprise?  @relation(fields: [enterpriseId], references: [id])
+  key             String
+  value           Json
+  updatedByUserId String?      @map("updated_by_user_id") @db.Uuid
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  @@unique([scope, enterpriseId, key])
+  @@map("settings")
+}
+
+model Notification {
+  id           String              @id @default(uuid()) @db.Uuid
+  userId       String?             @map("user_id") @db.Uuid
+  user         User?               @relation(fields: [userId], references: [id])
+  enterpriseId String?             @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise?         @relation(fields: [enterpriseId], references: [id])
+  type         NotificationType
+  channel      NotificationChannel
+  title        String
+  body         String
+  readAt       DateTime?           @map("read_at")
+  sentAt       DateTime?           @map("sent_at")
+  metadata     Json?
+  createdAt    DateTime            @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([enterpriseId])
+  @@map("notifications")
+}
