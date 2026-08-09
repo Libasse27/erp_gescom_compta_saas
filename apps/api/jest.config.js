@@ -4,4 +4,6 @@ module.exports = {
   testEnvironment: "node",
   rootDir: "src",
   testRegex: ".*\\.spec\\.ts$",
+  setupFiles: ["<rootDir>/../test/setup-env.js"],
+  globalSetup: "<rootDir>/../test/global-setup.js",
 };
