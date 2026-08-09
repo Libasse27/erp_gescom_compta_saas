@@ -1,0 +1,90 @@
+# ARCHITECTURE.md — Architecture cible du monorepo
+
+> Ce document décrit l'architecture cible mise en place à la Phase 0 (projet
+> neuf, voir `docs/adr/0000-projet-neuf.md`). Il sera étendu au fil des phases
+> suivantes (schéma de domaine en Phase 1, flux d'authentification en Phase 2,
+> etc.) plutôt que remplacé.
+
+## 1. Arborescence
+
+```text
+ERP_GESCOM_COMPTA_SAAS/
+│
+├── apps/
+│   ├── api/            NestJS — API REST, source de vérité des règles métier
+│   ├── web/             Next.js 15 (App Router) — Super Admin + espace entreprise
+│   ├── mobile/          non initialisé — ADR à venir en Phase 9
+│   └── desktop/         non initialisé — ADR à venir en Phase 9
+│
+├── packages/
+│   ├── types/            Types et DTO partagés (TypeScript pur)
+│   ├── validation/       Schémas Zod partagés (front + back)
+│   ├── permissions/       Catalogue RBAC (permissions, rôles par défaut)
+│   ├── auth/              Types/contrats d'auth partagés (payload JWT, TenantContext)
+│   ├── ui/                Composants React partagés (web, et mobile/desktop si pertinent)
+│   ├── utils/             Utilitaires partagés (formatFCFA, dates Africa/Dakar…)
+│   └── config/            Schémas de configuration/environnement partagés
+│
+├── docker/               Dockerfiles et compose — peuplé en Phase 10
+├── docs/                 Documentation (ce dossier)
+├── scripts/              Scripts opérationnels (seed, migrations, CLI Super Admin…)
+├── infra/                Infrastructure as code — peuplé en Phase 10
+│
+├── CLAUDE.md              Règles permanentes (chargé automatiquement)
+├── package.json           Scripts racine (turbo run …)
+├── pnpm-workspace.yaml
+├── turbo.json
+├── tsconfig.base.json     Config TS stricte partagée
+└── eslint.config.js       Config ESLint flat partagée
+```
+
+## 2. Stack (voir `CLAUDE.md` §2 pour la version normative)
+
+| Couche | Choix | Rationale (résumé — détail dans `docs/adr/`) |
+|---|---|---|
+| Monorepo | pnpm workspaces + Turborepo | Cache de build/test entre apps/packages, standard pour cette structure |
+| API | NestJS 10 | Couches controller/service/repository natives, DI, guards pour RBAC et tenant context |
+| Base de données | PostgreSQL 16 + Prisma | Row Level Security native pour l'isolation tenant structurelle, transactions ACID pour le provisioning |
+| Web | Next.js 15 (App Router) | Distinction propre Super Admin / Entreprise / onboarding, SEO pour les pages publiques |
+| Mobile / Desktop | À trancher (Phase 9) | Dépend des contraintes offline-first 3G/4G, non encore arbitrées |
+
+## 3. Flux de données (cible, mis en place progressivement)
+
+```text
+Client (web/mobile/desktop)
+   │  JWT (access token, ≤15 min)
+   ▼
+apps/api — AuthGuard (vérifie signature + expiration)
+   │  extrait { userId, enterpriseId, roles } du JWT vérifié
+   ▼
+TenantContext.run({ tenantId: enterpriseId, userId, roles })  [AsyncLocalStorage]
+   │
+   ▼
+Controller (HTTP) → Service (règles métier) → Repository (Prisma)
+   │
+   ▼
+PostgreSQL — SET LOCAL app.tenant_id = '<uuid>' (par transaction)
+   │  Row Level Security filtre automatiquement chaque requête
+   ▼
+Résultat scopé à l'entreprise du token — jamais au-delà
+```
+
+Voir `CLAUDE.md` §5 pour le détail normatif de ce flux et les interdits
+associés (accès direct au `PrismaClient`, `tenantId` reçu du client, etc.).
+
+## 4. Dépendances entre packages
+
+```text
+apps/api   → packages/types, validation, permissions, auth, utils, config
+apps/web   → packages/types, validation, permissions, ui, utils, config
+apps/mobile/desktop (futur) → packages/types, validation, permissions, utils
+```
+
+Aucune app ne doit dupliquer un type, un schéma de validation ou une
+définition de permission déjà présent dans `packages/`.
+
+## 5. État actuel
+
+Scaffolding uniquement (Phase 0) : structure, outillage (typecheck/lint/test/
+build), aucune entité de domaine ni route métier. Le schéma de domaine SaaS
+(`User`, `Enterprise`, `Plan`, `Subscription`, …) est l'objet de la Phase 1.
