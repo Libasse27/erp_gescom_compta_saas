@@ -4,6 +4,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { AuditLogService } from "../common/audit/audit-log.service";
 import { parseDurationMs } from "../common/duration";
 import { env } from "../config/env";
+import { MfaService } from "./mfa.service";
 import { PasswordService } from "./password.service";
 import { TokenService } from "./token.service";
 
@@ -30,6 +31,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly passwordService: PasswordService,
     private readonly tokenService: TokenService,
+    private readonly mfaService: MfaService,
     private readonly auditLog: AuditLogService,
   ) {}
 
@@ -158,6 +160,54 @@ export class AuthService {
 
     const accessToken = this.tokenService.signAccessToken({ id: userId, enterpriseId, isSuperAdmin });
     return { accessToken, refreshToken: rawRefreshToken };
+  }
+
+  async verifyMfaAndIssueTokens(
+    challengeToken: string,
+    code: string,
+    meta: RequestMetadata,
+  ): Promise<{ accessToken: string; refreshToken: string }> {
+    let userId: string;
+    try {
+      userId = this.tokenService.verifyMfaChallengeToken(challengeToken).sub;
+    } catch {
+      throw new UnauthorizedException("Défi MFA invalide ou expiré");
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+
+    if (!user || !user.mfaEnabled || !user.mfaSecret) {
+      throw new UnauthorizedException("Défi MFA invalide ou expiré");
+    }
+
+    const secret = this.mfaService.decryptSecret(user.mfaSecret);
+    const codeValid = this.mfaService.verifyCode(secret, code);
+
+    if (!codeValid) {
+      await this.auditLog.record({
+        userId: user.id,
+        action: "MFA_CHALLENGE_FAILED",
+        resource: "User",
+        resourceId: user.id,
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
+      throw new UnauthorizedException("Code MFA invalide");
+    }
+
+    const tokens = await this.issueTokenPair(user.id, user.enterpriseId, user.isSuperAdmin);
+
+    await this.auditLog.record({
+      userId: user.id,
+      action: "LOGIN",
+      resource: "User",
+      resourceId: user.id,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+      metadata: { mfa: true },
+    });
+
+    return tokens;
   }
 
   async refresh(rawToken: string, meta: RequestMetadata): Promise<{ accessToken: string; refreshToken: string }> {

@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, UseGuards } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import { Request } from "express";
-import { loginSchema, refreshTokenSchema } from "@erp/validation";
+import { loginSchema, mfaVerifySchema, refreshTokenSchema } from "@erp/validation";
 import { AUTH_RATE_LIMIT } from "../common/rate-limit";
 import { ZodValidationPipe } from "../common/validation/zod-validation.pipe";
 import { AuthService } from "./auth.service";
@@ -24,6 +24,15 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   login(@Body(new ZodValidationPipe(loginSchema)) body: { email: string; password: string }, @Req() req: Request) {
     return this.authService.login(body.email, body.password, requestMeta(req));
+  }
+
+  @Post("mfa/verify")
+  @HttpCode(HttpStatus.OK)
+  verifyMfa(
+    @Body(new ZodValidationPipe(mfaVerifySchema)) body: { challengeToken: string; code: string },
+    @Req() req: Request,
+  ) {
+    return this.authService.verifyMfaAndIssueTokens(body.challengeToken, body.code, requestMeta(req));
   }
 
   @Post("refresh")
