@@ -296,10 +296,45 @@ Abstraction `PaymentProvider` → `WaveProvider`, `OrangeMoneyProvider`,
 
 **Critères d'acceptation**
 
-- [ ] Webhook rejoué 3 fois → un seul abonnement créé (test).
-- [ ] Webhook non signé → rejeté (test).
-- [ ] Échec de paiement → `PAST_DUE` + notification + période de grâce (test).
-- [ ] Facture générée avec numérotation séquentielle par tenant, mentions légales sénégalaises, TVA correcte.
+- [x] Webhook rejoué 3 fois → un seul abonnement créé (test).
+      *(adapté à ce projet : un webhook ne crée jamais de `Subscription` — elle
+      existe déjà avant tout paiement, provisionnée en Phase 6 — donc le test
+      vérifie l'équivalent réel : rejoué 3×, un seul changement de statut et
+      une seule facture générée, pas trois)*
+- [x] Webhook non signé → rejeté (test).
+- [x] Échec de paiement → `PAST_DUE` + notification + période de grâce (test).
+- [x] Facture générée avec numérotation séquentielle par tenant, mentions légales sénégalaises, TVA correcte.
+
+> Réalisé (2026-08-09) : `PaymentProviderAdapter` (interface) +
+> `HmacPaymentProviderAdapter` (HMAC-SHA256 générique, comparaison en temps
+> constant) pour les 5 valeurs de `PaymentProvider` — schéma de signature
+> réel par fournisseur (Wave, Orange Money, Stripe...) volontairement différé
+> faute d'identifiants marchands vérifiables, voir
+> `docs/adr/0010-verification-signature-webhook-hmac-generique.md`.
+> `PaymentsWebhookController` (`POST /webhooks/payments/:provider`, route
+> publique, `main.ts` en `rawBody: true` pour signer les octets bruts exacts)
+> + `PaymentWebhookService` (connexion d'identité, flux pré-tenant comme
+> `AuthService`, docs/adr/0008-...) : idempotence par
+> `(provider, providerReference)`, jamais de paiement inventé depuis le seul
+> webhook (doit référencer un `Payment(PENDING)` déjà amorcé), machine à
+> états existante réutilisée (`ACTIVE⇄PAST_DUE`), `renewalDate` repoussée de
+> `PAYMENT_GRACE_PERIOD_DAYS` (7 par défaut) à chaque échec. Amorce d'un
+> `Payment(PENDING)` par le Super Admin
+> (`POST /admin/enterprises/:id/payments`, `CrossTenantRepository` étendu) en
+> attendant un vrai flux de checkout (Phase 6/7). `InvoiceGenerationService` :
+> numérotation séquentielle par tenant via `InvoiceCounter`
+> (`INSERT...ON CONFLICT...RETURNING`, atomique et testé sous concurrence),
+> TVA 18 % (`vatRateBasisPoints`), mentions légales générées (identité de la
+> plateforme en placeholders explicites — aucune donnée légale réelle
+> n'existe encore pour elle). `NotificationsService` créé (persistance +
+> envoi via `MAIL_SENDER`), même traitement que `AuditLogService`
+> (connexion d'identité, pas encore de lecture scopée tenant). Différé,
+> faute d'infrastructure : suspension automatique après expiration de la
+> période de grâce (aucun job planifié n'existe encore, même report que la
+> Phase 3) ; écran de réconciliation Super Admin (aucune interface avant la
+> Phase 7, même report que les Phases 3/4) ; file d'attente/retry réseau
+> (aucun flux d'appel sortant vers un fournisseur réel n'existe encore, seul
+> le webhook entrant est construit).
 
 ---
 

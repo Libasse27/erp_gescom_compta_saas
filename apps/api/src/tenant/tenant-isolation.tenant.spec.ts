@@ -79,6 +79,21 @@ describe("Tenant isolation (RLS + TenantContext)", () => {
     expect(seen).toBeNull();
   });
 
+  it("scopes invoice_counters to the current tenant (Phase 5, RLS added alongside the other tenant tables)", async () => {
+    const enterpriseA = await createEnterprise(`Tenant A ${randomUUID()}`);
+    const enterpriseB = await createEnterprise(`Tenant B ${randomUUID()}`);
+    await prisma.invoiceCounter.create({ data: { enterpriseId: enterpriseA.id, lastNumber: 1 } });
+    await prisma.invoiceCounter.create({ data: { enterpriseId: enterpriseB.id, lastNumber: 1 } });
+
+    const seenByA = await TenantContext.run(
+      { tenantId: enterpriseA.id, userId: randomUUID(), isSuperAdmin: false },
+      () => tenantPrisma.run((tx) => tx.invoiceCounter.findMany()),
+    );
+    expect(seenByA.map((c) => c.enterpriseId)).toEqual([enterpriseA.id]);
+
+    await prisma.invoiceCounter.deleteMany({ where: { enterpriseId: { in: [enterpriseA.id, enterpriseB.id] } } });
+  });
+
   it("erp_app_tenant is neither superuser nor RLS-bypassing, and does not own the tenant tables", async () => {
     const [role] = await prisma.$queryRaw<{ rolsuper: boolean; rolbypassrls: boolean }[]>`
       SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'erp_app_tenant'

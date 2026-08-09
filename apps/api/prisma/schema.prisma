@@ -234,9 +234,10 @@ model Enterprise {
   subscriptions Subscription[] @relation("EnterpriseSubscriptions")
   payments      Payment[]
   invoices      Invoice[]
-  auditLogs     AuditLog[]
-  settings      Setting[]
-  notifications Notification[]
+  auditLogs      AuditLog[]
+  settings       Setting[]
+  notifications  Notification[]
+  invoiceCounter InvoiceCounter?
 
   // NINEA/RCCM uniques par pays, nullables (non exigés à l'inscription,
   // voir docs/SPECIFICATIONS-SAAS.md §7 étape 2 — seul "Nom entreprise" est requis).
@@ -467,25 +468,48 @@ model Payment {
 }
 
 model Invoice {
-  id             String        @id @default(uuid()) @db.Uuid
-  enterpriseId   String        @map("enterprise_id") @db.Uuid
-  enterprise     Enterprise    @relation(fields: [enterpriseId], references: [id])
-  subscriptionId String?       @map("subscription_id") @db.Uuid
-  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
-  number         String        @unique
-  amount         Int
-  status         InvoiceStatus @default(DRAFT)
-  issuedAt       DateTime?     @map("issued_at")
-  dueAt          DateTime?     @map("due_at")
-  paidAt         DateTime?     @map("paid_at")
-  pdfUrl         String?       @map("pdf_url")
-  createdAt      DateTime      @default(now()) @map("created_at")
-  updatedAt      DateTime      @updatedAt @map("updated_at")
+  id                 String        @id @default(uuid()) @db.Uuid
+  enterpriseId       String        @map("enterprise_id") @db.Uuid
+  enterprise         Enterprise    @relation(fields: [enterpriseId], references: [id])
+  subscriptionId     String?       @map("subscription_id") @db.Uuid
+  subscription       Subscription? @relation(fields: [subscriptionId], references: [id])
+  // Formatée à la génération (ex: "INV-<8 premiers caractères enterpriseId>-000123"),
+  // construite à partir d'InvoiceCounter (Phase 5) — jamais un simple
+  // auto-increment global, voir docs/PROMPT-MAITRE-SAAS.md Phase 3 §"numérotation
+  // par tenant, sans trou, résistante à la concurrence".
+  number             String        @unique
+  // amount = amountExcludingTax + vatAmount (TTC). Aucune arithmétique en
+  // virgule flottante (CLAUDE.md §7) : vatRateBasisPoints=1800 => 18.00%.
+  amount             Int
+  amountExcludingTax Int           @map("amount_excluding_tax")
+  vatAmount          Int           @map("vat_amount")
+  vatRateBasisPoints Int           @map("vat_rate_basis_points")
+  legalMentions      String        @map("legal_mentions")
+  status             InvoiceStatus @default(DRAFT)
+  issuedAt           DateTime?     @map("issued_at")
+  dueAt              DateTime?     @map("due_at")
+  paidAt             DateTime?     @map("paid_at")
+  pdfUrl             String?       @map("pdf_url")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
 
   payments Payment[]
 
   @@index([enterpriseId])
   @@map("invoices")
+}
+
+// Compteur atomique par entreprise (Phase 5) : incrémenté via
+// `INSERT ... ON CONFLICT (enterprise_id) DO UPDATE ... RETURNING` dans la
+// même transaction que la création de l'Invoice — jamais un COUNT(*), qui ne
+// résiste pas à la concurrence et laisserait des trous après un rollback.
+model InvoiceCounter {
+  enterpriseId String     @id @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
+  lastNumber   Int        @default(0) @map("last_number")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  @@map("invoice_counters")
 }
 
 // ─────────────────────────────────────────────────────────────────────────

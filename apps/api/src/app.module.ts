@@ -6,6 +6,7 @@ import { AuditLogModule } from "./common/audit/audit-log.module";
 import { AuthModule } from "./auth/auth.module";
 import { EntitlementsModule } from "./entitlements/entitlements.module";
 import { NotificationsModule } from "./notifications/notifications.module";
+import { PaymentsModule } from "./payments/payments.module";
 import { SubscriptionsModule } from "./subscriptions/subscriptions.module";
 import { TenantModule } from "./tenant/tenant.module";
 import { TenantContextMiddleware } from "./tenant/tenant-context.middleware";
@@ -25,6 +26,7 @@ import { GLOBAL_RATE_LIMIT } from "./common/rate-limit";
     EntitlementsModule,
     UsersModule,
     SubscriptionsModule,
+    PaymentsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

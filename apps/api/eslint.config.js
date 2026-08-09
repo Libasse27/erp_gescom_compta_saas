@@ -30,6 +30,17 @@ module.exports = tseslint.config(
       // connexion d'identité tant qu'aucun endpoint ne consulte les logs
       // d'une entreprise (voir docs/adr/0008-...).
       "src/common/audit/**",
+      // Même raisonnement que AuditLog : les notifications sont créées
+      // avant qu'un tenant soit connu (webhook de paiement, Phase 5) comme
+      // depuis un contexte tenant, et rien ne les lit encore via une liste
+      // scopée tenant.
+      "src/notifications/notifications.service.ts",
+      // Le webhook de paiement (Phase 5) n'a pas de JWT, donc pas de
+      // TenantContext — flux pré-tenant au même titre que AuthService
+      // (docs/adr/0008-...). Chaque requête re-vérifie explicitement
+      // l'enterpriseId/subscriptionId contre le Payment déjà en base,
+      // jamais depuis le payload du webhook lui-même.
+      "src/payments/payments-webhook.service.ts",
       "**/*.spec.ts",
     ],
     rules: {

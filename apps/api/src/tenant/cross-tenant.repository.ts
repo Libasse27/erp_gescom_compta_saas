@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { Enterprise, Plan, Subscription, SubscriptionStatus } from "@prisma/client";
+import { Enterprise, Payment, PaymentProvider, Plan, Subscription, SubscriptionStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 
 // Seul point d'accès autorisé pour une route Super Admin qui doit lire ou
@@ -44,5 +44,18 @@ export class CrossTenantRepository {
     triggeredByUserId: string;
   }): Promise<{ id: string }> {
     return this.prisma.subscriptionEvent.create({ data, select: { id: true } });
+  }
+
+  // Amorce un Payment(PENDING) — tient lieu de flux de checkout réel, qui
+  // n'existe pas avant la Phase 6/7 (docs/PROMPT-MAITRE-SAAS.md Phase 5).
+  createPendingPayment(data: {
+    enterpriseId: string;
+    subscriptionId: string;
+    provider: PaymentProvider;
+    providerReference: string;
+    amount: number;
+    currency: string;
+  }): Promise<Payment> {
+    return this.prisma.payment.create({ data: { ...data, status: "PENDING" } });
   }
 }

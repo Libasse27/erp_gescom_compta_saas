@@ -1,3 +1,5 @@
+import { PaymentProvider } from "@prisma/client";
+
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
@@ -19,4 +21,9 @@ export const env = {
   // JWT ; ce court cache mémoire borne juste la charge Postgres. 0 en test
   // pour un comportement déterministe (voir test/setup-env.js).
   entitlementsCacheTtlMs: () => Number(process.env.ENTITLEMENTS_CACHE_TTL_MS ?? 5000),
+  // Secret HMAC générique par fournisseur (Phase 5, docs/adr/0010-...) : un
+  // placeholder par fournisseur en attendant le schéma de signature réel de
+  // chaque vendeur (identifiants marchands non disponibles à ce stade).
+  paymentWebhookSecret: (provider: PaymentProvider) => requireEnv(`PAYMENT_WEBHOOK_SECRET_${provider}`),
+  paymentGracePeriodDays: () => Number(process.env.PAYMENT_GRACE_PERIOD_DAYS ?? 7),
 };
