@@ -99,5 +99,14 @@ définition de permission déjà présent dans `packages/`.
   invitations, `PermissionsGuard` (re-résolution en base à chaque requête),
   audit log, rate limiting `/auth/*`, seed du catalogue `Permission`, CLI
   `create-super-admin`. 48 tests d'intégration contre un PostgreSQL de test
-  réel (`test/global-setup.js`). Toujours pas de RLS ni de `TenantContext`
-  (Phase 3), pas de `/auth/register` public (Phase 6), pas d'UI (Phase 7).
+  réel (`test/global-setup.js`). Pas de `/auth/register` public (Phase 6),
+  pas d'UI (Phase 7).
+- **Phase 3** : isolation multi-tenant dans `apps/api/src/tenant`
+  (`TenantContext`, `TenantContextMiddleware`, `TenantScopedPrismaService`).
+  Deux rôles PostgreSQL distincts (`erp` sans RLS pour les résolutions
+  pré-tenant, `erp_app_tenant` avec RLS forcée pour tout le reste — ADR 0008)
+  et une règle ESLint (`apps/api/eslint.config.js`) qui interdit
+  `PrismaService`/`PrismaClient` en dehors d'une liste explicite. Suite
+  `test:tenant` (5 tests) prouvant l'isolation au niveau base, pas seulement
+  applicatif. Pas encore de table métier ERP à laquelle appliquer la RLS
+  au-delà des tables plateforme déjà tenant-scoped (Phase 8).

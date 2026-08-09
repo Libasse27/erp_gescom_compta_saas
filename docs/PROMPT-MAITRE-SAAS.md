@@ -214,10 +214,24 @@ Ordre imposé :
 
 **Critères d'acceptation**
 
-- [ ] `test:tenant` passe intégralement, y compris le test générique appliqué à tous les endpoints de liste.
-- [ ] Aucune régression : les tests fonctionnels d'origine passent toujours.
-- [ ] Zéro requête Prisma hors repository (vérifié par lint ou script).
-- [ ] Le rôle applicatif Postgres n'est ni superuser ni propriétaire des tables (RLS non contournable).
+- [x] `test:tenant` passe intégralement.
+      *(le test générique « tous les endpoints de liste » ne s'applique pas encore : aucun endpoint de liste tenant n'existe avant la Phase 8)*
+- [x] Aucune régression : les 48 tests fonctionnels de la Phase 2 passent toujours (53 au total avec la Phase 3).
+- [x] Zéro requête Prisma hors repository (vérifié par règle ESLint `no-restricted-imports`, testée positive et négative).
+- [x] Le rôle applicatif Postgres (`erp_app_tenant`) n'est ni superuser ni propriétaire des tables (RLS non contournable, testé).
+
+> Réalisé (2026-08-09) : ADR 0008 (deux rôles Postgres), migration RLS
+> (`enterprises`, `roles`, `user_roles`, `role_permissions`, `users`,
+> `settings`, `notifications`, `subscriptions`, `subscription_events`,
+> `payments`, `invoices`), `TenantContext` (AsyncLocalStorage, peuplé par
+> middleware avant tous les guards), `TenantScopedPrismaService` (`SET LOCAL`
+> par transaction via `set_config`), `PermissionsGuard` et
+> `InvitationsService.invite()` migrés dessus. `AuditLogService` reste sur la
+> connexion d'identité (justifié dans l'ADR — écritures pré-tenant
+> fréquentes, pas de RLS pertinente tant qu'aucune lecture scopée tenant
+> n'existe). Points de vigilance (numérotation par tenant, exports, jobs
+> planifiés, cache Redis) **reportés à la Phase 8** : aucune table métier ERP
+> n'existe encore à laquelle les appliquer.
 
 ---
 

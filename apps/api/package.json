@@ -6,7 +6,7 @@
     "build": "nest build",
     "dev": "nest start --watch",
     "start": "node dist/main.js",
-    "lint": "eslint --config ../../eslint.config.js src",
+    "lint": "eslint src",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "jest --passWithNoTests",
     "test:tenant": "jest --passWithNoTests --testPathPattern=\"\\.tenant\\.spec\\.ts$\"",

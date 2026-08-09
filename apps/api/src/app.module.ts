@@ -1,10 +1,12 @@
-import { Module } from "@nestjs/common";
+import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { PrismaModule } from "./prisma/prisma.module";
 import { AuditLogModule } from "./common/audit/audit-log.module";
 import { AuthModule } from "./auth/auth.module";
 import { NotificationsModule } from "./notifications/notifications.module";
+import { TenantModule } from "./tenant/tenant.module";
+import { TenantContextMiddleware } from "./tenant/tenant-context.middleware";
 import { UsersModule } from "./users/users.module";
 import { GLOBAL_RATE_LIMIT } from "./common/rate-limit";
 
@@ -17,8 +19,14 @@ import { GLOBAL_RATE_LIMIT } from "./common/rate-limit";
     AuditLogModule,
     NotificationsModule,
     AuthModule,
+    TenantModule,
     UsersModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    // Doit s'exécuter avant tous les guards (voir tenant-context.middleware.ts).
+    consumer.apply(TenantContextMiddleware).forRoutes("*");
+  }
+}

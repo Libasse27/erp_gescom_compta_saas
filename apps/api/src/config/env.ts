@@ -14,4 +14,5 @@ export const env = {
   jwtAccessTtl: () => process.env.JWT_ACCESS_TTL ?? "15m",
   jwtRefreshTtl: () => process.env.JWT_REFRESH_TTL ?? "30d",
   mfaEncryptionKey: () => requireEnv("MFA_ENCRYPTION_KEY"),
+  tenantDatabaseUrl: () => requireEnv("TENANT_DATABASE_URL"),
 };

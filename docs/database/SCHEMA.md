@@ -9,10 +9,12 @@ Entités **plateforme** uniquement (`User`, `Enterprise`, RBAC, `Plan`,
 abonnement, paiement/facturation, audit, notifications). Aucun module ERP
 (clients, produits, ventes…) n'est modélisé ici — c'est l'objet de la Phase 8.
 
-Aucune Row Level Security n'est activée à ce stade : les colonnes
-`enterpriseId` sont posées pour que la Phase 3 puisse les exploiter, mais les
-policies RLS elles-mêmes sont une tâche de Phase 3
-(`docs/adr/0002-point-application-isolation.md`).
+> Mise à jour Phase 3 (2026-08-09) : la Row Level Security est maintenant
+> active sur les tables listées ci-dessous — voir
+> `docs/adr/0008-deux-roles-postgres-identite-vs-tenant.md` et la migration
+> `20260809113836_add_tenant_role_and_rls`. Le reste de ce document décrit le
+> schéma de données (Phase 1) ; l'isolation elle-même est documentée dans
+> l'ADR 0008 et `docs/PROMPT-MAITRE-SAAS.md` Phase 3.
 
 ## 2. Diagramme (vue d'ensemble)
 
@@ -159,9 +161,15 @@ erDiagram
 
 ## 9. Ce qui n'est délibérément pas dans ce schéma
 
-- **RLS PostgreSQL** : policies ajoutées en Phase 3.
-- **Repository/service layer** : Phase 2 (auth) et Phase 3 (tenant-scoping).
+- **RLS PostgreSQL** : active depuis la Phase 3 sur `enterprises`, `roles`,
+  `user_roles`, `role_permissions`, `users`, `settings`, `notifications`,
+  `subscriptions`, `subscription_events`, `payments`, `invoices` — voir
+  `docs/adr/0008-deux-roles-postgres-identite-vs-tenant.md`.
+  `refresh_tokens`/`auth_tokens` en restent exclus (pas de colonne
+  `enterpriseId`, isolation par unicité du hash) ; `audit_logs` aussi, tant
+  qu'aucune lecture scopée tenant n'existe (même ADR).
 - **Tables ERP** (`Customer`, `Product`, `Sale`, `Purchase`, `Stock`,
-  écritures comptables…) : Phase 8, une fois le socle SaaS posé et testé.
+  écritures comptables…) : Phase 8, une fois le socle SaaS posé et testé —
+  à créer déjà tenant-scoped (`enterpriseId` + RLS) dès leur introduction.
 - **Table de liaison multi-entreprise par utilisateur** : hors scope V1
   (ADR 0004) ; migration à prévoir si le besoin apparaît.
