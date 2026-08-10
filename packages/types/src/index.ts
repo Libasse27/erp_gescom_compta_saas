@@ -198,6 +198,50 @@ export interface SalesInvoiceLine {
   lineTotalIncludingTax: number;
 }
 
+// Module ERP — Comptabilité (Phase 8, module 8). Account : sous-compte du
+// plan SYSCOHADA (la classe est son premier chiffre de `code`, pas un champ
+// séparé — voir schema.prisma, model Account). JournalEntry/Line : écriture
+// à partie double, append-only (pas d'update/delete). balance sur
+// AccountView est calculée à la lecture (somme des lignes), jamais stockée.
+export interface Account {
+  id: string;
+  enterpriseId: string;
+  code: string;
+  label: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AccountWithBalance extends Account {
+  totalDebit: number;
+  totalCredit: number;
+  balance: number;
+}
+
+export interface JournalEntryLine {
+  id: string;
+  accountId: string;
+  accountCode: string;
+  accountLabel: string;
+  label: string | null;
+  debitAmount: number;
+  creditAmount: number;
+}
+
+export interface JournalEntry {
+  id: string;
+  enterpriseId: string;
+  number: string;
+  entryDate: string;
+  reference: string | null;
+  description: string;
+  totalDebit: number;
+  totalCredit: number;
+  lines: JournalEntryLine[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SalesInvoice {
   id: string;
   enterpriseId: string;

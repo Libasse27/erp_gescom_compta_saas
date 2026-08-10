@@ -2,6 +2,7 @@ import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { PrismaModule } from "./prisma/prisma.module";
+import { AccountingModule } from "./accounting/accounting.module";
 import { AuditLogModule } from "./common/audit/audit-log.module";
 import { AuthModule } from "./auth/auth.module";
 import { CustomersModule } from "./customers/customers.module";
@@ -53,6 +54,7 @@ import { GLOBAL_RATE_LIMIT } from "./common/rate-limit";
     SalesModule,
     PurchasesModule,
     InvoicingModule,
+    AccountingModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

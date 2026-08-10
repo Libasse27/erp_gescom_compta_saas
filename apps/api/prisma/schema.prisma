@@ -117,6 +117,9 @@ enum AuditAction {
   CANCEL_PURCHASE
   MARK_INVOICE_PAID
   VOID_INVOICE
+  CREATE_ACCOUNT
+  UPDATE_ACCOUNT
+  CREATE_JOURNAL_ENTRY
   CHANGE_PLAN
   PAYMENT
   SUSPEND_ACCOUNT
@@ -270,6 +273,9 @@ model Enterprise {
   purchaseLines   PurchaseLine[]
   salesInvoices       SalesInvoice[]
   salesInvoiceCounter SalesInvoiceCounter?
+  journalEntries       JournalEntry[]
+  journalEntryLines    JournalEntryLine[]
+  journalEntryCounter  JournalEntryCounter?
 
   // NINEA/RCCM uniques par pays, nullables (non exigés à l'inscription,
   // voir docs/SPECIFICATIONS-SAAS.md §7 étape 2 — seul "Nom entreprise" est requis).
@@ -340,14 +346,18 @@ model UserRole {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Comptabilité — squelette minimal (Phase 6)
+// Comptabilité (Phase 8, module 8)
 // ─────────────────────────────────────────────────────────────────────────
 
-// Uniquement les 8 classes racines du plan comptable SYSCOHADA révisé,
-// initialisées au provisioning de chaque entreprise (docs/PROMPT-MAITRE-SAAS.md
-// Phase 6). Le détail des sous-comptes et les écritures comptables sont
-// l'objet du module Comptabilité complet (Phase 8) — volontairement absent
-// ici, ce modèle n'est qu'un point de départ.
+// Les 8 classes racines SYSCOHADA sont initialisées au provisioning
+// (Phase 6, syscohada-chart-of-accounts.ts) ; l'ADMIN/COMPTABLE crée ensuite
+// ses propres sous-comptes (ex: "601000") avec ce même modèle — pas de
+// distinction racine/sous-compte en base (pas de parentId) : la classe d'un
+// compte est son premier chiffre, convention SYSCOHADA déjà appliquée par
+// le format de `code` (validé par packages/validation), pas une hiérarchie
+// mécanique séparée qu'aucun besoin exprimé ne justifie encore. `code` est
+// immuable une fois créé (les écritures le référencent) : seul `label` est
+// modifiable (accounting.update).
 model Account {
   id           String     @id @default(uuid()) @db.Uuid
   enterpriseId String     @map("enterprise_id") @db.Uuid
@@ -355,10 +365,88 @@ model Account {
   code         String
   label        String
   createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  journalEntryLines JournalEntryLine[]
 
   @@unique([enterpriseId, code])
   @@index([enterpriseId])
   @@map("accounts")
+}
+
+// Écriture comptable : append-only, comme StockMovement (voir
+// stock.repository.ts, "grand livre") — aucune route update/delete, une
+// correction se fait par une nouvelle écriture de contre-passation, jamais
+// en réécrivant l'historique. Pas de statut DRAFT/POSTED dans ce cycle :
+// une écriture créée est immédiatement définitive (JournalRepository.create
+// vérifie l'équilibre débit=crédit avant insertion, jamais après).
+// entryDate distinct de createdAt : la date comptable (ex: écriture de
+// clôture saisie a posteriori) n'est pas forcément la date de saisie.
+model JournalEntry {
+  id           String     @id @default(uuid()) @db.Uuid
+  enterpriseId String     @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
+
+  // Formatée à la création (ex: "ECR-<8 premiers caractères enterpriseId>-000123"),
+  // séquence dédiée (JournalEntryCounter) — même patron que
+  // SalesInvoiceCounter (module Facturation), un domaine de numérotation
+  // légale de plus, indépendant des deux autres.
+  number      String   @unique
+  entryDate   DateTime @default(now()) @map("entry_date")
+  reference   String?
+  description String
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  lines JournalEntryLine[]
+
+  @@index([enterpriseId])
+  @@index([enterpriseId, entryDate])
+  @@map("journal_entries")
+}
+
+// enterpriseId dupliqué depuis JournalEntry (pas seulement via la jointure
+// journalEntryId) : une policy RLS ne peut pas traverser une relation, même
+// contrainte que SaleLine/PurchaseLine. debitAmount/creditAmount : exactement
+// un des deux est non nul par ligne (validé côté packages/validation, pas en
+// contrainte SQL — même choix que la garde stock négatif de StockRepository,
+// une règle métier vérifiée applicativement). Aucun total stocké sur
+// JournalEntry : la balance d'un compte se calcule à la lecture en sommant
+// ses lignes (voir AccountingModule, trial-balance) — jamais une donnée
+// dérivée stockée, même principe que StockLevel.quantityOnHand.
+model JournalEntryLine {
+  id             String       @id @default(uuid()) @db.Uuid
+  journalEntryId String       @map("journal_entry_id") @db.Uuid
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+
+  enterpriseId String     @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
+  accountId    String     @map("account_id") @db.Uuid
+  account      Account    @relation(fields: [accountId], references: [id])
+
+  label         String?
+  debitAmount   Int      @default(0) @map("debit_amount")
+  creditAmount  Int      @default(0) @map("credit_amount")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([enterpriseId])
+  @@index([journalEntryId])
+  @@index([accountId])
+  @@map("journal_entry_lines")
+}
+
+// Compteur atomique par entreprise, même patron que SalesInvoiceCounter/
+// InvoiceCounter : incrémenté via `INSERT ... ON CONFLICT ... RETURNING`
+// dans la même transaction que la création de JournalEntry.
+model JournalEntryCounter {
+  enterpriseId String     @id @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
+  lastNumber   Int        @default(0) @map("last_number")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  @@map("journal_entry_counters")
 }
 
 // ─────────────────────────────────────────────────────────────────────────
