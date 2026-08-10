@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "scripts": {
     "build": "nest build",
-    "dev": "nest start --watch",
+    "dev": "nest start --watch --exec \"node -r ts-node/register/transpile-only\"",
     "start": "node dist/main.js",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit -p tsconfig.json",
