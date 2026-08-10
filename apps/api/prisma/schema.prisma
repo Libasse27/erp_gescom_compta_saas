@@ -106,6 +106,8 @@ enum AuditAction {
   CREATE_SUPPLIER
   UPDATE_SUPPLIER
   DELETE_SUPPLIER
+  CREATE_PRODUCT
+  DELETE_PRODUCT
   CHANGE_PLAN
   PAYMENT
   SUSPEND_ACCOUNT
@@ -251,6 +253,7 @@ model Enterprise {
   onboardingState OnboardingState?
   customers       Customer[]
   suppliers       Supplier[]
+  products        Product[]
 
   // NINEA/RCCM uniques par pays, nullables (non exigés à l'inscription,
   // voir docs/SPECIFICATIONS-SAAS.md §7 étape 2 — seul "Nom entreprise" est requis).
@@ -343,7 +346,7 @@ model Account {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Module ERP — Clients / Fournisseurs (Phase 8, modules 1 et 2)
+// Module ERP — Clients / Fournisseurs / Produits (Phase 8, modules 1 à 3)
 // ─────────────────────────────────────────────────────────────────────────
 
 // Suppression toujours logique (isActive=false) : les futurs modules Ventes
@@ -405,6 +408,46 @@ model Supplier {
   @@index([enterpriseId])
   @@index([enterpriseId, isActive])
   @@map("suppliers")
+}
+
+// Module 3 de la Phase 8 : un produit n'est pas un tiers (contrairement à
+// Customer/Supplier), c'est un article de catalogue avec un prix — modèle
+// de champs différent, pas une copie.
+// - code obligatoire et unique PAR TENANT (@@unique([enterpriseId, code])) :
+//   contrairement à NINEA/RCCM sur Client/Fournisseur, un produit a toujours
+//   besoin d'un identifiant court et stable.
+// - Prix stocké HT (sellingPriceExcludingTax) + taux de TVA en points de
+//   base (vatRateBasisPoints, 1800 = 18 %) — même patron que
+//   Invoice.vatRateBasisPoints ; le TTC est calculé à l'affichage, jamais
+//   stocké (évite la dérive de données). Jamais de flottant (CLAUDE.md §7).
+// - Pas de purchasePrice (coût d'achat) dans ce cycle : aucun module
+//   Achats/Stock n'existe encore pour l'utiliser.
+// - trackStock distingue un produit physique (suivi de stock, module Stock
+//   à venir) d'un service/produit non stocké — posé dès maintenant pour
+//   éviter une migration rétrospective sur tous les produits déjà créés.
+model Product {
+  id           String     @id @default(uuid()) @db.Uuid
+  enterpriseId String     @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
+
+  code                     String
+  name                     String
+  description              String?
+  unit                     String  @default("pièce")
+  category                 String?
+  barcode                  String?
+  sellingPriceExcludingTax Int     @map("selling_price_excluding_tax")
+  vatRateBasisPoints       Int     @default(1800) @map("vat_rate_basis_points")
+  trackStock               Boolean @default(true) @map("track_stock")
+  isActive                 Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([enterpriseId, code])
+  @@index([enterpriseId])
+  @@index([enterpriseId, isActive])
+  @@map("products")
 }
 
 // ─────────────────────────────────────────────────────────────────────────

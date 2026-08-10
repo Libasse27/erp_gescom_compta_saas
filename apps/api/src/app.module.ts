@@ -10,6 +10,7 @@ import { NotificationsModule } from "./notifications/notifications.module";
 import { OnboardingModule } from "./onboarding/onboarding.module";
 import { PaymentsModule } from "./payments/payments.module";
 import { PlansModule } from "./plans/plans.module";
+import { ProductsModule } from "./products/products.module";
 import { ProvisioningModule } from "./provisioning/provisioning.module";
 import { RolesModule } from "./roles/roles.module";
 import { SettingsModule } from "./settings/settings.module";
@@ -43,6 +44,7 @@ import { GLOBAL_RATE_LIMIT } from "./common/rate-limit";
     OnboardingModule,
     CustomersModule,
     SuppliersModule,
+    ProductsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

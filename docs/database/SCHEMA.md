@@ -7,10 +7,10 @@
 
 Entités **plateforme** (`User`, `Enterprise`, RBAC, `Plan`, abonnement,
 paiement/facturation, audit, notifications), complétées depuis la Phase 8 par
-les entités **ERP** (tenant-scoped), module par module. `Customer` (§5bis) et
-`Supplier` (§5ter) sont les deux premiers modules ERP migrés ; les autres
-(produits, ventes, achats, stocks, facturation, comptabilité, rapports)
-suivent le même patron.
+les entités **ERP** (tenant-scoped), module par module. `Customer` (§5bis),
+`Supplier` (§5ter) et `Product` (§5quater) sont les trois premiers modules ERP
+migrés ; les autres (ventes, achats, stocks, facturation, comptabilité,
+rapports) suivent le même patron.
 
 > Mise à jour Phase 3 (2026-08-09) : la Row Level Security est maintenant
 > active sur les tables listées ci-dessous — voir
@@ -34,6 +34,7 @@ erDiagram
     Enterprise ||--o{ Notification : "recoit"
     Enterprise ||--o{ Customer : "gere (Phase 8)"
     Enterprise ||--o{ Supplier : "gere (Phase 8)"
+    Enterprise ||--o{ Product : "gere (Phase 8)"
 
     User ||--o{ UserRole : "a"
     Role ||--o{ UserRole : "assigne a"
@@ -142,6 +143,32 @@ duplication). Deux écarts seulement par rapport au gabarit Clients :
   `DELETE_CLIENT` (déjà présente depuis la Phase 1), aucune clé fournisseur
   n'existait.
 
+## 5quater. Module ERP — `Product` (Phase 8, module 3)
+
+Contrairement à `Customer`/`Supplier` (des tiers), `Product` est un article de
+catalogue — modèle de champs différent, pas une copie :
+
+- `code` obligatoire, unique **par tenant** (`@@unique([enterpriseId, code])`)
+  — premier modèle ERP avec une contrainte d'unicité métier ; mappée en 409
+  (`ConflictException`) côté repository plutôt que de laisser fuiter l'erreur
+  Prisma `P2002` brute, même patron que la gestion NINEA/RCCM du
+  `ProvisioningService` (Phase 6).
+- Prix stocké HT (`sellingPriceExcludingTax`, `Int`, XOF) + taux de TVA en
+  points de base (`vatRateBasisPoints`, défaut 1800 = 18 %, `CLAUDE.md` §7) ;
+  le TTC se calcule à l'affichage, jamais stocké — évite la dérive de données
+  si le taux change après coup.
+- `trackStock` (défaut `true`) distingue un produit physique (suivi de stock,
+  module Stock à venir) d'un service non stocké — posé dès maintenant pour
+  éviter une migration rétrospective sur tous les produits déjà créés.
+- Pas de `purchasePrice` (coût d'achat) dans ce cycle : aucun module
+  Achats/Stock n'existe encore pour l'utiliser.
+- Aucun écart par rapport au gabarit Clients/Fournisseurs, contrairement au
+  module Fournisseurs : les permissions `products.read/create/update/delete`
+  (catalogue `packages/permissions`) et l'entrée de menu/route `/app/products`
+  existaient déjà (posées par anticipation lors des Phases 2 et 7.2, comme
+  `clients.*`) — seules deux nouvelles clés `AuditAction` ont dû être créées
+  (`CREATE_PRODUCT`, `DELETE_PRODUCT`).
+
 ## 6. Abonnement
 
 - Historique complet : une `Enterprise` a plusieurs `Subscription` au fil du
@@ -204,14 +231,15 @@ duplication). Deux écarts seulement par rapport au gabarit Clients :
 - **RLS PostgreSQL** : active depuis la Phase 3 sur `enterprises`, `roles`,
   `user_roles`, `role_permissions`, `users`, `settings`, `notifications`,
   `subscriptions`, `subscription_events`, `payments`, `invoices`, `accounts`,
-  et depuis la Phase 8 sur `customers` et `suppliers` — voir
+  et depuis la Phase 8 sur `customers`, `suppliers` et `products` — voir
   `docs/adr/0008-deux-roles-postgres-identite-vs-tenant.md`.
   `refresh_tokens`/`auth_tokens` en restent exclus (pas de colonne
   `enterpriseId`, isolation par unicité du hash) ; `audit_logs` aussi, tant
   qu'aucune lecture scopée tenant n'existe (même ADR).
-- **Tables ERP restantes** (`Product`, `Sale`, `Purchase`, `Stock`,
-  écritures comptables…) : reste de la Phase 8, module par module —
-  `Customer`/`Supplier` (§5bis/§5ter) servent de patron : tenant-scoped
-  (`enterpriseId` + RLS) dès l'introduction de chaque nouveau modèle.
+- **Tables ERP restantes** (`Sale`, `Purchase`, `Stock`, écritures
+  comptables…) : reste de la Phase 8, module par module —
+  `Customer`/`Supplier`/`Product` (§5bis/§5ter/§5quater) servent de patron :
+  tenant-scoped (`enterpriseId` + RLS) dès l'introduction de chaque nouveau
+  modèle.
 - **Table de liaison multi-entreprise par utilisateur** : hors scope V1
   (ADR 0004) ; migration à prévoir si le besoin apparaît.

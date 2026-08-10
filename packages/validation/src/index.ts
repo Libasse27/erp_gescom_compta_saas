@@ -6,3 +6,4 @@ export * from "./registration";
 export * from "./onboarding";
 export * from "./customers";
 export * from "./suppliers";
+export * from "./products";

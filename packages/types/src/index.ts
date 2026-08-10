@@ -47,3 +47,26 @@ export interface Supplier {
   createdAt: string;
   updatedAt: string;
 }
+
+// Module ERP — Produits (Phase 8, module 3). Contrairement à
+// Customer/Supplier, un produit n'est pas un tiers : nouveau modèle de
+// champs (code unique par entreprise, prix HT + TVA, suivi de stock), pas
+// une copie. Prix stocké HT (sellingPriceExcludingTax) + taux de TVA en
+// points de base (vatRateBasisPoints, 1800 = 18 %) — le TTC se calcule à
+// l'affichage, jamais stocké.
+export interface Product {
+  id: string;
+  enterpriseId: string;
+  code: string;
+  name: string;
+  description: string | null;
+  unit: string;
+  category: string | null;
+  barcode: string | null;
+  sellingPriceExcludingTax: number;
+  vatRateBasisPoints: number;
+  trackStock: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}

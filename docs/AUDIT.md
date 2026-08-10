@@ -134,3 +134,62 @@ la base de dev, sans modifier `seed.ts` ni la config. À trancher via un ADR
 dédié, dans le même esprit que le bug `pnpm dev`/`pnpm start` déjà documenté
 en Phase 10 — les deux sont probablement liés (résolution de version
 TypeScript incohérente entre les différents exécuteurs du monorepo).
+
+## Module Produits — réalisé (2026-08-10)
+
+**Classification** : à créer.
+
+**Modèle** : `Product` (`apps/api/prisma/schema.prisma`) — contrairement à
+`Customer`/`Supplier` (des tiers), pas une copie : voir
+`docs/database/SCHEMA.md` §5quater pour le détail des champs.
+
+**Backend** : `apps/api/src/products/` — même patron en couches que
+`customers/`/`suppliers/` (`ProductsRepository` → `ProductsService` →
+`ProductsController`). Routes `GET/POST /products`,
+`GET/PATCH/DELETE /products/:id` (DELETE = suppression logique).
+
+**Écart par rapport au gabarit** (inverse de Fournisseurs) : aucun écart —
+les permissions `products.read/create/update/delete`
+(`packages/permissions`) et l'entrée de menu + route `/app/products`
+existaient déjà, posées par anticipation dès les Phases 2 et 7.2 (comme
+`clients.*`). Seules deux clés `AuditAction` ont dû être ajoutées
+(`CREATE_PRODUCT`, `DELETE_PRODUCT` — `UPDATE_PRODUCT` existait déjà depuis
+la Phase 1).
+
+**Sécurité appliquée** : identique aux modules Clients/Fournisseurs —
+permissions `products.*`, feature de plan `products` (booléenne, activée sur
+les 4 forfaits au seed), `FeatureGuard`/`SubscriptionAccessGuard`, RLS
+PostgreSQL forcée sur `products`, audit log
+(`CREATE_PRODUCT`/`UPDATE_PRODUCT`/`DELETE_PRODUCT`).
+
+**Décision structurante propre à ce module** : `code` unique **par tenant**
+(`@@unique([enterpriseId, code])`) — première contrainte d'unicité métier sur
+un modèle ERP de ce projet. Conflit mappé en `ConflictException` (409) côté
+repository plutôt que de laisser fuiter l'erreur Prisma `P2002` brute, même
+patron que la gestion NINEA/RCCM du `ProvisioningService` (Phase 6). Prix
+stocké HT (`sellingPriceExcludingTax`, entier XOF) + `vatRateBasisPoints`
+(points de base, défaut 1800 = 18 %) ; le TTC n'est jamais stocké, calculé à
+l'affichage. Suppression toujours logique, comme les deux modules précédents.
+
+**Tests** : `products.integration.spec.ts` (CRUD nominal, validation, 403
+permission manquante, 403 feature désactivée, 409 code dupliqué — cas propre
+à ce module, absent des gabarits Clients/Fournisseurs qui n'ont pas de
+contrainte d'unicité), `products.tenant.spec.ts`, `products.repository.spec.ts`
+(pagination, recherche nom/code/code-barres, filtre actif/inactif, 409 sur
+code dupliqué dans le même tenant, code réutilisable entre tenants
+différents) — pas de cas ajouté à `tenant/tenant-isolation.tenant.spec.ts`
+(la suite partagée couvre déjà le patron RLS générique via Clients/Fournisseurs,
+aucune spécificité `Product` à y ajouter).
+
+**Frontend** : `apps/web/src/app/app/products/page.tsx` — remplace le
+placeholder `ComingSoon`, copie de `suppliers/page.tsx` adaptée aux champs
+produit (prix HT formaté `formatFCFA`, TVA affichée en %, colonne « Stock
+suivi »). `ProductForm` (`apps/web/src/components/product-form.tsx`) ajoute
+deux champs numériques (`type="number"`, `valueAsNumber`) et une case à
+cocher native (`trackStock`) — premiers de ce type dans le monorepo, aucun
+composant `Checkbox`/`NumberInput` dédié n'existait déjà dans
+`apps/web/src/components/ui/`.
+
+Vérifié par `pnpm typecheck`/`lint`/`test`/`test:tenant`/`build` (monorepo
+complet, 171 tests API dont 15 nouveaux pour Produits) et un build de
+production `apps/web` réel (page `/app/products` passée de 182 B à 5.31 kB).

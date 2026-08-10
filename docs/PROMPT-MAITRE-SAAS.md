@@ -578,6 +578,20 @@ détail par module et la justification de l'ordre).
 > `pnpm dev`/`pnpm start` déjà documenté ci-dessous, à trancher ensemble via
 > un ADR avant la Phase 10.
 
+> Réalisé (2026-08-10, module Produits) : troisième module ERP. Modèle
+> `Product` tenant-scoped (RLS forcée) — contrairement à Clients/Fournisseurs
+> (des tiers), pas une copie : article de catalogue avec `code` unique par
+> tenant (`@@unique([enterpriseId, code])`, mappé en 409 côté repository),
+> prix HT + TVA en points de base (le TTC n'est jamais stocké), `trackStock`
+> — voir `docs/database/SCHEMA.md` §5quater et `docs/AUDIT.md` pour le
+> détail. Contrairement à Fournisseurs, aucun écart par rapport au gabarit :
+> permissions `products.*` et route `/app/products` existaient déjà
+> (anticipées Phases 2/7.2). Vérifié par `products.integration.spec.ts`,
+> `products.tenant.spec.ts`, `products.repository.spec.ts` (dont un test du
+> conflit de code dupliqué, cas propre à ce module), `pnpm typecheck`/`lint`/
+> `test`/`test:tenant`/`build` (monorepo complet, 171 tests API) et un build
+> de production `apps/web` réel.
+
 ---
 
 ### PHASE 9 — Mobile et Desktop
