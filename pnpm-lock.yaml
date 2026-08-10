@@ -117,6 +117,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@erp/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       '@erp/validation':
         specifier: workspace:*
         version: link:../../packages/validation

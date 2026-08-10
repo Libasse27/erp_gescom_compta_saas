@@ -5,9 +5,11 @@
 
 ## 1. Périmètre
 
-Entités **plateforme** uniquement (`User`, `Enterprise`, RBAC, `Plan`,
-abonnement, paiement/facturation, audit, notifications). Aucun module ERP
-(clients, produits, ventes…) n'est modélisé ici — c'est l'objet de la Phase 8.
+Entités **plateforme** (`User`, `Enterprise`, RBAC, `Plan`, abonnement,
+paiement/facturation, audit, notifications), complétées depuis la Phase 8 par
+les entités **ERP** (tenant-scoped), module par module. `Customer` (§5bis)
+est le premier module ERP migré ; les autres (produits, ventes, achats,
+stocks, facturation, comptabilité, rapports) suivent le même patron.
 
 > Mise à jour Phase 3 (2026-08-09) : la Row Level Security est maintenant
 > active sur les tables listées ci-dessous — voir
@@ -29,6 +31,7 @@ erDiagram
     Enterprise ||--o{ AuditLog : "genere"
     Enterprise ||--o{ Setting : "configure"
     Enterprise ||--o{ Notification : "recoit"
+    Enterprise ||--o{ Customer : "gere (Phase 8)"
 
     User ||--o{ UserRole : "a"
     Role ||--o{ UserRole : "assigne a"
@@ -102,6 +105,26 @@ erDiagram
   déploiement pour ajouter une **nouvelle** clé, mais l'activation d'une clé
   existante pour un plan donné ne nécessite jamais de déploiement.
 
+## 5bis. Module ERP — `Customer` (Phase 8)
+
+- Premier modèle **tenant-scoped** hors socle plateforme : `enterpriseId`
+  (indexé) + RLS forcée dès sa migration (`20260809235329_add_customer`),
+  même patron que `Account` (Phase 6) — voir `CustomersRepository`
+  (`apps/api/src/customers/`), seul point d'accès Prisma autorisé.
+- Suppression **toujours logique** (`isActive=false`, jamais de `DELETE`
+  physique) : les modules Ventes/Facturation à venir référenceront
+  `customerId` en FK, une suppression physique casserait leur historique.
+- `NINEA`/`RCCM` : format libre (pas de regex), contrairement à l'intention
+  affichée dans `CLAUDE.md` §7 — aucune règle de format officielle n'est
+  encore documentée dans le projet ; même choix que `Enterprise.ninea/rccm`
+  (Phase 1). Pas d'unicité DB non plus (un même NINEA peut légitimement
+  apparaître côté client d'un tenant et fournisseur d'un autre).
+- Accès conditionné par une **feature de plan** booléenne (`Feature.key =
+  "clients"`, activée sur les 4 forfaits au seed) en plus de la permission
+  RBAC (`clients.read/create/update/delete`) — premier consommateur réel de
+  `@RequiresFeature` (Phase 4, jusque-là seulement testé directement, jamais
+  posé sur une route). Pas de quota chiffré (`Limit`) dans ce cycle.
+
 ## 6. Abonnement
 
 - Historique complet : une `Enterprise` a plusieurs `Subscription` au fil du
@@ -163,13 +186,15 @@ erDiagram
 
 - **RLS PostgreSQL** : active depuis la Phase 3 sur `enterprises`, `roles`,
   `user_roles`, `role_permissions`, `users`, `settings`, `notifications`,
-  `subscriptions`, `subscription_events`, `payments`, `invoices` — voir
+  `subscriptions`, `subscription_events`, `payments`, `invoices`, `accounts`,
+  et depuis la Phase 8 sur `customers` — voir
   `docs/adr/0008-deux-roles-postgres-identite-vs-tenant.md`.
   `refresh_tokens`/`auth_tokens` en restent exclus (pas de colonne
   `enterpriseId`, isolation par unicité du hash) ; `audit_logs` aussi, tant
   qu'aucune lecture scopée tenant n'existe (même ADR).
-- **Tables ERP** (`Customer`, `Product`, `Sale`, `Purchase`, `Stock`,
-  écritures comptables…) : Phase 8, une fois le socle SaaS posé et testé —
-  à créer déjà tenant-scoped (`enterpriseId` + RLS) dès leur introduction.
+- **Tables ERP restantes** (`Product`, `Sale`, `Purchase`, `Stock`,
+  écritures comptables…) : reste de la Phase 8, module par module — `Customer`
+  (§5bis) sert de patron : tenant-scoped (`enterpriseId` + RLS) dès
+  l'introduction de chaque nouveau modèle.
 - **Table de liaison multi-entreprise par utilisateur** : hors scope V1
   (ADR 0004) ; migration à prévoir si le besoin apparaît.

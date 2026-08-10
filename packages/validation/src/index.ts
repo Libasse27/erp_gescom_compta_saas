@@ -4,3 +4,4 @@ export * from "./subscriptions";
 export * from "./payments";
 export * from "./registration";
 export * from "./onboarding";
+export * from "./customers";

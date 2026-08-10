@@ -3,10 +3,11 @@ import { PrismaService } from "../prisma/prisma.service";
 import { TenantContext } from "./tenant-context";
 import { TenantScopedPrismaService } from "./tenant-scoped-prisma.service";
 
-// Suite test:tenant (docs/PROMPT-MAITRE-SAAS.md Phase 3). Le test générique
-// "tous les endpoints de liste" ne s'applique pas encore : aucun endpoint de
-// liste tenant n'existe avant la Phase 8. Cette suite vérifie directement le
-// mécanisme d'isolation (RLS + TenantContext) sur ce qui existe aujourd'hui.
+// Suite test:tenant (docs/PROMPT-MAITRE-SAAS.md Phase 3) : vérifie
+// directement le mécanisme d'isolation (RLS + TenantContext), table par
+// table. Le test générique "tous les endpoints de liste" appliqué au premier
+// vrai endpoint de liste tenant (GET /customers, Phase 8) vit dans
+// customers/customers.tenant.spec.ts, au niveau HTTP plutôt qu'ici.
 describe("Tenant isolation (RLS + TenantContext)", () => {
   const prisma = new PrismaService();
   const tenantPrisma = new TenantScopedPrismaService();
@@ -120,6 +121,20 @@ describe("Tenant isolation (RLS + TenantContext)", () => {
     expect(seenByA.map((s) => s.enterpriseId)).toEqual([enterpriseA.id]);
 
     await prisma.onboardingState.deleteMany({ where: { enterpriseId: { in: [enterpriseA.id, enterpriseB.id] } } });
+  });
+
+  it("scopes customers to the current tenant (Phase 8, module Clients)", async () => {
+    const enterpriseA = await createEnterprise(`Tenant A ${randomUUID()}`);
+    const enterpriseB = await createEnterprise(`Tenant B ${randomUUID()}`);
+    await prisma.customer.create({ data: { enterpriseId: enterpriseA.id, type: "COMPANY", name: "Client A" } });
+    await prisma.customer.create({ data: { enterpriseId: enterpriseB.id, type: "COMPANY", name: "Client B" } });
+
+    const seenByA = await TenantContext.run({ tenantId: enterpriseA.id, userId: randomUUID(), isSuperAdmin: false }, () =>
+      tenantPrisma.run((tx) => tx.customer.findMany()),
+    );
+    expect(seenByA.map((c) => c.enterpriseId)).toEqual([enterpriseA.id]);
+
+    await prisma.customer.deleteMany({ where: { enterpriseId: { in: [enterpriseA.id, enterpriseB.id] } } });
   });
 
   it("erp_app_tenant is neither superuser nor RLS-bypassing, and does not own the tenant tables", async () => {

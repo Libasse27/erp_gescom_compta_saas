@@ -4,6 +4,7 @@ import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { PrismaModule } from "./prisma/prisma.module";
 import { AuditLogModule } from "./common/audit/audit-log.module";
 import { AuthModule } from "./auth/auth.module";
+import { CustomersModule } from "./customers/customers.module";
 import { EntitlementsModule } from "./entitlements/entitlements.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { OnboardingModule } from "./onboarding/onboarding.module";
@@ -39,6 +40,7 @@ import { GLOBAL_RATE_LIMIT } from "./common/rate-limit";
     SettingsModule,
     SuperAdminModule,
     OnboardingModule,
+    CustomersModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

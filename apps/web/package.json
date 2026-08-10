@@ -12,6 +12,7 @@
     "test:tenant": "echo \"no tests yet\" && exit 0"
   },
   "dependencies": {
+    "@erp/types": "workspace:*",
     "@erp/validation": "workspace:*",
     "@hookform/resolvers": "^5.7.1",
     "@radix-ui/react-label": "^2.1.15",

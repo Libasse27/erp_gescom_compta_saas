@@ -530,6 +530,34 @@ Aucun module suivant n'est entamé tant que le précédent n'est pas vert.
 - [ ] Entitlements de plan appliqués + testés.
 - [ ] Exports et impressions scopés.
 
+**Ordre retenu** : Clients → Fournisseurs → Produits → Stock → Ventes →
+Achats → Facturation → Comptabilité → Rapports (voir `docs/AUDIT.md` pour le
+détail par module et la justification de l'ordre).
+
+> Réalisé (2026-08-10, module Clients) : premier module ERP, sert de patron
+> d'architecture pour les modules suivants. Modèle `Customer` tenant-scoped
+> (RLS forcée, même patron que `accounts`) — voir `docs/database/SCHEMA.md`
+> §5bis et `docs/AUDIT.md`. Backend `apps/api/src/customers/` en couches
+> repository/service/controller (première introduction d'une couche
+> repository explicite pour un module métier — `CLAUDE.md` §5/§8 l'exige,
+> contrairement aux modules plateforme antérieurs qui accèdent
+> `TenantScopedPrismaService` directement depuis le service). Sécurité :
+> permissions `clients.*` (catalogue Phase 2, jamais consommé avant),
+> feature de plan `clients` (premier `@RequiresFeature` posé sur une vraie
+> route, Phase 4), `SubscriptionAccessGuard`, audit log. Suppression toujours
+> logique (`isActive=false`) : pas de `DELETE` physique, les modules
+> Ventes/Facturation référenceront `customerId` en FK. Frontend
+> `apps/web/src/app/app/clients/` : liste paginée/recherche/filtre,
+> formulaire unique création+édition, désactivation avec confirmation inline
+> (pas de nouvelle dépendance `Dialog`). Vérifié par `customers.integration.spec.ts`,
+> `customers.tenant.spec.ts`, `customers.repository.spec.ts`, un cas ajouté à
+> `tenant/tenant-isolation.tenant.spec.ts`, `pnpm typecheck`/`lint`/`test`/
+> `test:tenant`/`build` (monorepo complet) et un build de production
+> `apps/web` réel. Bug découvert et corrigé en cours de route :
+> `z.coerce.boolean()` sur `isActive` aurait inversé silencieusement
+> `?isActive=false` — remplacé par un `z.enum(...).transform(...)` explicite,
+> couvert par un test de régression.
+
 ---
 
 ### PHASE 9 — Mobile et Desktop

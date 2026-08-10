@@ -32,6 +32,15 @@ async function main() {
       update: {},
     });
 
+    // Feature "clients" (Phase 8) : booléenne, active sur les 4 forfaits —
+    // pas de quota chiffré tant que la grille tarifaire réelle des limites
+    // ERP n'est pas validée (docs/PROMPT-MAITRE-SAAS.md Phase 8, module Clients).
+    const clientsFeature = await prisma.feature.upsert({
+      where: { key: "clients" },
+      create: { key: "clients", label: "Clients" },
+      update: {},
+    });
+
     for (const planData of PLANS) {
       const { maxUsers, ...data } = planData;
       const plan = await prisma.plan.upsert({
@@ -43,6 +52,11 @@ async function main() {
         where: { planId_limitId: { planId: plan.id, limitId: usersLimit.id } },
         create: { planId: plan.id, limitId: usersLimit.id, value: maxUsers },
         update: { value: maxUsers },
+      });
+      await prisma.planFeature.upsert({
+        where: { planId_featureId: { planId: plan.id, featureId: clientsFeature.id } },
+        create: { planId: plan.id, featureId: clientsFeature.id, enabled: true },
+        update: { enabled: true },
       });
     }
     console.log(`Catalogue de forfaits synchronisé (${PLANS.length} forfaits).`);

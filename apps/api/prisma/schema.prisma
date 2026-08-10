@@ -1,10 +1,8 @@
-// Schéma de domaine SaaS — Phase 1 (docs/PROMPT-MAITRE-SAAS.md).
-// Entités plateforme uniquement : aucun module ERP (clients, produits,
-// ventes...) n'est modélisé ici, voir Phase 8.
+// Schéma de domaine SaaS — Phase 1 (docs/PROMPT-MAITRE-SAAS.md), complété par
+// les modules ERP au fil de la Phase 8 (un modèle par module migré).
 //
-// Isolation tenant : les colonnes enterpriseId sont posées dès maintenant,
-// mais les policies Row Level Security PostgreSQL (docs/adr/0002-...) sont
-// ajoutées en Phase 3, pas ici.
+// Isolation tenant : toute table tenant porte enterpriseId, indexé, avec une
+// policy Row Level Security PostgreSQL correspondante (docs/adr/0002-...).
 
 generator client {
   provider = "prisma-client-js"
@@ -87,6 +85,11 @@ enum NotificationChannel {
   SMS
 }
 
+enum CustomerType {
+  INDIVIDUAL
+  COMPANY
+}
+
 enum AuditAction {
   LOGIN
   LOGOUT
@@ -98,6 +101,8 @@ enum AuditAction {
   CREATE_INVOICE
   UPDATE_PRODUCT
   DELETE_CLIENT
+  CREATE_CUSTOMER
+  UPDATE_CUSTOMER
   CHANGE_PLAN
   PAYMENT
   SUSPEND_ACCOUNT
@@ -241,6 +246,7 @@ model Enterprise {
   invoiceCounter InvoiceCounter?
   accounts       Account[]
   onboardingState OnboardingState?
+  customers       Customer[]
 
   // NINEA/RCCM uniques par pays, nullables (non exigés à l'inscription,
   // voir docs/SPECIFICATIONS-SAAS.md §7 étape 2 — seul "Nom entreprise" est requis).
@@ -330,6 +336,41 @@ model Account {
   @@unique([enterpriseId, code])
   @@index([enterpriseId])
   @@map("accounts")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Module ERP — Clients (Phase 8, premier module métier migré)
+// ─────────────────────────────────────────────────────────────────────────
+
+// Suppression toujours logique (isActive=false) : les futurs modules Ventes
+// et Facturation référenceront customerId en FK, une suppression physique
+// casserait leur historique (docs/PROMPT-MAITRE-SAAS.md Phase 8).
+// NINEA/RCCM : format validé côté packages/validation, pas d'unicité DB
+// (un même NINEA peut apparaître côté client d'un tenant et fournisseur
+// d'un autre, ou légitimement en double sur des tenants indépendants).
+model Customer {
+  id           String       @id @default(uuid()) @db.Uuid
+  enterpriseId String       @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise   @relation(fields: [enterpriseId], references: [id])
+
+  type         CustomerType @default(COMPANY)
+  name         String
+  email        String?
+  phone        String?
+  address      String?
+  city         String?
+  country      String       @default("Sénégal")
+  ninea        String?
+  rccm         String?
+  notes        String?
+  isActive     Boolean      @default(true) @map("is_active")
+
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  @@index([enterpriseId])
+  @@index([enterpriseId, isActive])
+  @@map("customers")
 }
 
 // ─────────────────────────────────────────────────────────────────────────
