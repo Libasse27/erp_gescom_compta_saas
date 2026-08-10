@@ -242,6 +242,59 @@ export interface JournalEntry {
   updatedAt: string;
 }
 
+// Module ERP — Rapports (Phase 8, module 9). Lecture seule, agrège les
+// modules précédents (Ventes/Achats/Comptabilité) — aucun modèle Prisma
+// propre. byDay : uniquement les jours ayant au moins une vente/un achat
+// (pas de jours à zéro insérés), le tri par date reste à la charge de
+// l'affichage si nécessaire.
+export interface ReportDailyPoint {
+  date: string;
+  count: number;
+  totalExcludingTax: number;
+  totalVat: number;
+  totalIncludingTax: number;
+}
+
+export interface SalesReport {
+  dateFrom: string;
+  dateTo: string;
+  count: number;
+  totalExcludingTax: number;
+  totalVat: number;
+  totalIncludingTax: number;
+  byDay: ReportDailyPoint[];
+}
+
+export interface PurchasesReport {
+  dateFrom: string;
+  dateTo: string;
+  count: number;
+  totalExcludingTax: number;
+  totalVat: number;
+  totalIncludingTax: number;
+  byDay: ReportDailyPoint[];
+}
+
+// Compte de résultat simplifié : produits (classe SYSCOHADA 7) - charges
+// (classe 6) = résultat net. Pas de bilan (classes 1-5) dans ce cycle — voir
+// ReportsRepository, scope volontairement borné.
+export interface IncomeStatementAccountLine {
+  accountId: string;
+  accountCode: string;
+  accountLabel: string;
+  amount: number;
+}
+
+export interface IncomeStatement {
+  dateFrom: string;
+  dateTo: string;
+  totalRevenue: number;
+  totalExpenses: number;
+  netResult: number;
+  revenueByAccount: IncomeStatementAccountLine[];
+  expensesByAccount: IncomeStatementAccountLine[];
+}
+
 export interface SalesInvoice {
   id: string;
   enterpriseId: string;
