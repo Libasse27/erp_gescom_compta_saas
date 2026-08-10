@@ -96,3 +96,45 @@ export interface StockLevel {
   unit: string;
   quantityOnHand: number;
 }
+
+// Module ERP — Ventes (Phase 8, module 5). Contrairement à
+// Customer/Supplier/Product (des fiches) et StockMovement (un mouvement
+// isolé), Sale a des lignes (SaleLine) et un cycle de vie
+// DRAFT -> CONFIRMED | CANCELLED (CONFIRMED terminal dans ce cycle). Aucun
+// total n'est stocké côté base : totalExcludingTax/Vat/IncludingTax ici sont
+// calculés côté API à partir des lignes (elles-mêmes un instantané figé du
+// prix/TVA au moment de la vente), pas une donnée dérivée qui pourrait
+// dériver. productCode/productName/customerName sont dénormalisés dans la
+// réponse pour l'affichage, pas stockés en base.
+export type SaleStatus = "DRAFT" | "CONFIRMED" | "CANCELLED";
+
+export interface SaleLine {
+  id: string;
+  productId: string;
+  productCode: string;
+  productName: string;
+  quantity: number;
+  unitPriceExcludingTax: number;
+  vatRateBasisPoints: number;
+  lineTotalExcludingTax: number;
+  lineTotalVat: number;
+  lineTotalIncludingTax: number;
+}
+
+export interface Sale {
+  id: string;
+  enterpriseId: string;
+  customerId: string;
+  customerName: string;
+  status: SaleStatus;
+  saleDate: string;
+  notes: string | null;
+  confirmedAt: string | null;
+  cancelledAt: string | null;
+  totalExcludingTax: number;
+  totalVat: number;
+  totalIncludingTax: number;
+  lines: SaleLine[];
+  createdAt: string;
+  updatedAt: string;
+}

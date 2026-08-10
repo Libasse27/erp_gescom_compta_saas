@@ -9,5 +9,9 @@ import { StockService } from "./stock.service";
   imports: [AuthModule],
   controllers: [StockController],
   providers: [StockRepository, StockService, PermissionsGuard],
+  // StockRepository exporté : SalesModule le compose pour décrémenter le
+  // stock à la confirmation d'une vente, dans SA PROPRE transaction (voir
+  // StockRepository.applyMovement).
+  exports: [StockRepository],
 })
 export class StockModule {}

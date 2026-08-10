@@ -109,6 +109,9 @@ enum AuditAction {
   CREATE_PRODUCT
   DELETE_PRODUCT
   CREATE_STOCK_MOVEMENT
+  CREATE_SALE
+  CONFIRM_SALE
+  CANCEL_SALE
   CHANGE_PLAN
   PAYMENT
   SUSPEND_ACCOUNT
@@ -256,6 +259,8 @@ model Enterprise {
   suppliers       Supplier[]
   products        Product[]
   stockMovements  StockMovement[]
+  sales           Sale[]
+  saleLines       SaleLine[]
 
   // NINEA/RCCM uniques par pays, nullables (non exigés à l'inscription,
   // voir docs/SPECIFICATIONS-SAAS.md §7 étape 2 — seul "Nom entreprise" est requis).
@@ -377,6 +382,8 @@ model Customer {
   createdAt    DateTime     @default(now()) @map("created_at")
   updatedAt    DateTime     @updatedAt @map("updated_at")
 
+  sales Sale[]
+
   @@index([enterpriseId])
   @@index([enterpriseId, isActive])
   @@map("customers")
@@ -447,6 +454,7 @@ model Product {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   stockMovements StockMovement[]
+  saleLines      SaleLine[]
 
   @@unique([enterpriseId, code])
   @@index([enterpriseId])
@@ -495,6 +503,80 @@ model StockMovement {
   @@index([enterpriseId, productId])
   @@index([enterpriseId, createdAt])
   @@map("stock_movements")
+}
+
+enum SaleStatus {
+  DRAFT
+  CONFIRMED
+  CANCELLED
+}
+
+// Module 5 de la Phase 8 : première entité ERP à lignes (Sale + SaleLine),
+// pas une copie des modules précédents. Sale n'est pas une facture — la
+// Facturation (module ultérieur, distinct) transformera une vente confirmée
+// en document légal ; ne pas anticiper son schéma ici.
+// - Cycle de vie volontairement minimal : DRAFT -> CONFIRMED | CANCELLED.
+//   CONFIRMED est terminal dans ce cycle (pas de retour en arrière qui
+//   réajusterait le stock déjà sorti) : une correction après confirmation
+//   passera par un futur avoir/retour, hors scope. CANCELLED n'est
+//   atteignable que depuis DRAFT (aucun impact stock, rien n'a encore été
+//   décrémenté).
+// - Aucun total stocké (totalExcludingTax/Vat/IncludingTax) : calculé à la
+//   lecture à partir des lignes, même principe que la quantité en stock
+//   (StockMovement) et le TTC produit — jamais de donnée dérivée stockée.
+model Sale {
+  id           String     @id @default(uuid()) @db.Uuid
+  enterpriseId String     @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
+  customerId   String     @map("customer_id") @db.Uuid
+  customer     Customer   @relation(fields: [customerId], references: [id])
+
+  status      SaleStatus @default(DRAFT)
+  saleDate    DateTime   @default(now()) @map("sale_date")
+  notes       String?
+  confirmedAt DateTime?  @map("confirmed_at")
+  cancelledAt DateTime?  @map("cancelled_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  lines SaleLine[]
+
+  @@index([enterpriseId])
+  @@index([enterpriseId, status])
+  @@map("sales")
+}
+
+// enterpriseId dupliqué depuis Sale (pas seulement via la jointure saleId) :
+// une policy RLS ne peut pas traverser une relation, chaque table tenant a
+// besoin de sa propre colonne — même contrainte que StockMovement.
+// unitPriceExcludingTax/vatRateBasisPoints sont un instantané au moment de
+// la vente, résolu côté serveur depuis Product (jamais transmis par le
+// client — CLAUDE.md §6, ne jamais faire confiance à une valeur monétaire
+// venue du client) : le prix catalogue peut changer ensuite sans altérer
+// l'historique des ventes déjà créées. Pas de remise/prix personnalisé dans
+// ce cycle. Lignes immuables après création (pas de route d'édition) :
+// une vente erronée se corrige en l'annulant puis en recréant, pas en
+// réécrivant ses lignes.
+model SaleLine {
+  id     String @id @default(uuid()) @db.Uuid
+  saleId String @map("sale_id") @db.Uuid
+  sale   Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  enterpriseId String     @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
+  productId    String     @map("product_id") @db.Uuid
+  product      Product    @relation(fields: [productId], references: [id])
+
+  quantity              Int
+  unitPriceExcludingTax Int @map("unit_price_excluding_tax")
+  vatRateBasisPoints    Int @map("vat_rate_basis_points")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([enterpriseId])
+  @@index([saleId])
+  @@map("sale_lines")
 }
 
 // ─────────────────────────────────────────────────────────────────────────

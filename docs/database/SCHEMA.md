@@ -8,9 +8,9 @@
 Entités **plateforme** (`User`, `Enterprise`, RBAC, `Plan`, abonnement,
 paiement/facturation, audit, notifications), complétées depuis la Phase 8 par
 les entités **ERP** (tenant-scoped), module par module. `Customer` (§5bis),
-`Supplier` (§5ter), `Product` (§5quater) et `StockMovement` (§5quinquies)
-sont les quatre premiers modules ERP migrés ; les autres (ventes, achats,
-facturation, comptabilité, rapports) suivent le même patron.
+`Supplier` (§5ter), `Product` (§5quater), `StockMovement` (§5quinquies) et
+`Sale`/`SaleLine` (§5sexies) sont les cinq premiers modules ERP migrés ; les
+autres (achats, facturation, comptabilité, rapports) suivent le même patron.
 
 > Mise à jour Phase 3 (2026-08-09) : la Row Level Security est maintenant
 > active sur les tables listées ci-dessous — voir
@@ -37,6 +37,10 @@ erDiagram
     Enterprise ||--o{ Product : "gere (Phase 8)"
     Enterprise ||--o{ StockMovement : "gere (Phase 8)"
     Product ||--o{ StockMovement : "mouvemente"
+    Enterprise ||--o{ Sale : "gere (Phase 8)"
+    Customer ||--o{ Sale : "achete"
+    Sale ||--o{ SaleLine : "contient"
+    Product ||--o{ SaleLine : "vendu via"
 
     User ||--o{ UserRole : "a"
     Role ||--o{ UserRole : "assigne a"
@@ -213,6 +217,46 @@ copie du gabarit précédent :
   update/delete). Une seule nouvelle clé `AuditAction`
   (`CREATE_STOCK_MOVEMENT`).
 
+## 5sexies. Module ERP — `Sale` / `SaleLine` (Phase 8, module 5)
+
+Première entité ERP **à lignes** — écart structurant, pas une copie du
+gabarit précédent. `Sale` n'est **pas** une facture : la Facturation (module
+ultérieur, distinct) transformera une vente confirmée en document légal ;
+son schéma n'est pas anticipé ici.
+
+- Cycle de vie volontairement minimal : `DRAFT -> CONFIRMED | CANCELLED`.
+  `CONFIRMED` est **terminal** dans ce cycle — pas de retour en arrière qui
+  réajusterait le stock déjà sorti ; une correction après confirmation
+  passera par un futur avoir/retour, hors scope. `CANCELLED` n'est
+  atteignable que depuis `DRAFT` (aucun impact stock à annuler).
+- **Lignes immuables, pas de PATCH** : `unitPriceExcludingTax` et
+  `vatRateBasisPoints` sur `SaleLine` sont un **instantané résolu côté
+  serveur** depuis `Product` au moment de la création — jamais transmis par
+  le client (`CLAUDE.md` §6, ne jamais faire confiance à une valeur
+  monétaire venue du client). Le prix catalogue peut changer ensuite sans
+  altérer l'historique des ventes déjà créées. Pas de remise/prix
+  personnalisé dans ce cycle. Une vente erronée se corrige en l'annulant
+  puis en recréant, pas en réécrivant ses lignes.
+- **Aucun total stocké** : `totalExcludingTax`/`totalVat`/`totalIncludingTax`
+  sont calculés à la lecture à partir des lignes (elles-mêmes figées), même
+  principe que la quantité en stock (§5quinquies) et le TTC produit
+  (§5quater) — jamais de donnée dérivée stockée.
+- **Confirmation = décrémentation de stock composée, pas dupliquée** :
+  `SalesRepository.confirm()` réutilise `StockRepository.applyMovement()`
+  (méthode extraite du module Stock, voir §5quinquies) pour chaque ligne
+  `trackStock=true`, **dans la même transaction `Serializable`** que le
+  passage à `CONFIRMED` — vente confirmée et stock décrémenté réussissent ou
+  échouent ensemble. Rejette (409) si une ligne dépasse le stock disponible.
+- `enterpriseId` dupliqué sur `SaleLine` (comme sur `StockMovement`) : une
+  policy RLS ne traverse pas une relation, chaque table tenant a besoin de
+  sa propre colonne.
+- Aucun écart de permissions/feature : `sales.read/create/update/delete`
+  existaient déjà. `confirm`/`cancel` sont mappées sur
+  `sales.update`/`sales.delete` (pas de nouvelles routes PATCH/DELETE au
+  sens strict — même patron que la désactivation logique de `Product` mappée
+  sur `products.delete`). Trois nouvelles clés `AuditAction`
+  (`CREATE_SALE`, `CONFIRM_SALE`, `CANCEL_SALE`).
+
 ## 6. Abonnement
 
 - Historique complet : une `Enterprise` a plusieurs `Subscription` au fil du
@@ -275,16 +319,17 @@ copie du gabarit précédent :
 - **RLS PostgreSQL** : active depuis la Phase 3 sur `enterprises`, `roles`,
   `user_roles`, `role_permissions`, `users`, `settings`, `notifications`,
   `subscriptions`, `subscription_events`, `payments`, `invoices`, `accounts`,
-  et depuis la Phase 8 sur `customers`, `suppliers`, `products` et
-  `stock_movements` — voir
+  et depuis la Phase 8 sur `customers`, `suppliers`, `products`,
+  `stock_movements`, `sales` et `sale_lines` — voir
   `docs/adr/0008-deux-roles-postgres-identite-vs-tenant.md`.
   `refresh_tokens`/`auth_tokens` en restent exclus (pas de colonne
   `enterpriseId`, isolation par unicité du hash) ; `audit_logs` aussi, tant
   qu'aucune lecture scopée tenant n'existe (même ADR).
-- **Tables ERP restantes** (`Sale`, `Purchase`, écritures comptables…) :
-  reste de la Phase 8, module par module —
-  `Customer`/`Supplier`/`Product`/`StockMovement`
-  (§5bis/§5ter/§5quater/§5quinquies) servent de patron : tenant-scoped
-  (`enterpriseId` + RLS) dès l'introduction de chaque nouveau modèle.
+- **Tables ERP restantes** (`Purchase`, écritures comptables…) : reste de la
+  Phase 8, module par module —
+  `Customer`/`Supplier`/`Product`/`StockMovement`/`Sale`
+  (§5bis/§5ter/§5quater/§5quinquies/§5sexies) servent de patron :
+  tenant-scoped (`enterpriseId` + RLS) dès l'introduction de chaque nouveau
+  modèle.
 - **Table de liaison multi-entreprise par utilisateur** : hors scope V1
   (ADR 0004) ; migration à prévoir si le besoin apparaît.

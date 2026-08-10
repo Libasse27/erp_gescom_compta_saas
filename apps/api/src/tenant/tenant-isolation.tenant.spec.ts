@@ -176,6 +176,27 @@ describe("Tenant isolation (RLS + TenantContext)", () => {
     await prisma.product.deleteMany({ where: { id: { in: [productA.id, productB.id] } } });
   });
 
+  it("scopes sales to the current tenant (Phase 8, module Ventes)", async () => {
+    const enterpriseA = await createEnterprise(`Tenant A ${randomUUID()}`);
+    const enterpriseB = await createEnterprise(`Tenant B ${randomUUID()}`);
+    const customerA = await prisma.customer.create({
+      data: { enterpriseId: enterpriseA.id, type: "COMPANY", name: "Client A" },
+    });
+    const customerB = await prisma.customer.create({
+      data: { enterpriseId: enterpriseB.id, type: "COMPANY", name: "Client B" },
+    });
+    const saleA = await prisma.sale.create({ data: { enterpriseId: enterpriseA.id, customerId: customerA.id } });
+    const saleB = await prisma.sale.create({ data: { enterpriseId: enterpriseB.id, customerId: customerB.id } });
+
+    const seenByA = await TenantContext.run({ tenantId: enterpriseA.id, userId: randomUUID(), isSuperAdmin: false }, () =>
+      tenantPrisma.run((tx) => tx.sale.findMany()),
+    );
+    expect(seenByA.map((s) => s.enterpriseId)).toEqual([enterpriseA.id]);
+
+    await prisma.sale.deleteMany({ where: { id: { in: [saleA.id, saleB.id] } } });
+    await prisma.customer.deleteMany({ where: { id: { in: [customerA.id, customerB.id] } } });
+  });
+
   it("erp_app_tenant is neither superuser nor RLS-bypassing, and does not own the tenant tables", async () => {
     const [role] = await prisma.$queryRaw<{ rolsuper: boolean; rolbypassrls: boolean }[]>`
       SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'erp_app_tenant'

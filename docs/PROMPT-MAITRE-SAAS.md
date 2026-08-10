@@ -607,6 +607,21 @@ détail par module et la justification de l'ordre).
 > `pnpm typecheck`/`lint`/`test`/`test:tenant`/`build` (monorepo complet) et
 > un build de production `apps/web` réel.
 
+> Réalisé (2026-08-10, module Ventes) : cinquième module ERP, première
+> entité à lignes (`Sale`/`SaleLine`) — écart structurant, pas une copie.
+> `Sale` n'est pas une facture (Facturation reste un module ultérieur
+> distinct). Cycle `DRAFT -> CONFIRMED | CANCELLED`, `CONFIRMED` terminal
+> dans ce cycle. Prix/TVA de chaque ligne résolus côté serveur depuis
+> `Product` à la création, jamais transmis par le client. La confirmation
+> décrémente le stock en composant `StockRepository.applyMovement()` (extrait
+> du module Stock) dans la même transaction `Serializable` que le passage à
+> `CONFIRMED` — voir `docs/database/SCHEMA.md` §5sexies et `docs/AUDIT.md`
+> pour le détail. Aucun écart sur les permissions/route. Vérifié par
+> `sales.repository.spec.ts`, `sales.integration.spec.ts`,
+> `sales.tenant.spec.ts`, un cas ajouté à `tenant-isolation.tenant.spec.ts`,
+> `pnpm typecheck`/`lint`/`test`/`test:tenant`/`build` (monorepo complet) et
+> un build de production `apps/web` réel.
+
 ---
 
 ### PHASE 9 — Mobile et Desktop

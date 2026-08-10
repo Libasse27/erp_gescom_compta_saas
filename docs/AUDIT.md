@@ -260,3 +260,76 @@ sous la liste après sélection.
 
 Vérifié par `pnpm typecheck`/`lint`/`test`/`test:tenant`/`build` (monorepo
 complet) et un build de production `apps/web` réel.
+
+## Module Ventes — réalisé (2026-08-10)
+
+**Classification** : à créer.
+
+**Écart structurant par rapport au gabarit** : première entité ERP **à
+lignes** (`Sale` + `SaleLine`), pas une copie des modules précédents. `Sale`
+n'est pas une facture — la Facturation (module ultérieur, distinct) en fera
+un document légal à partir d'une vente confirmée. Cycle de vie minimal :
+`DRAFT -> CONFIRMED | CANCELLED`, `CONFIRMED` terminal dans ce cycle (pas de
+retour en arrière). Aucun total stocké : `totalExcludingTax`/`totalVat`/
+`totalIncludingTax` calculés à la lecture à partir des lignes, même principe
+que Stock/Produits. Voir `docs/database/SCHEMA.md` §5sexies pour le détail.
+
+**Backend** : `apps/api/src/sales/` — `SalesRepository` (seul point d'accès
+Prisma) → `SalesService` → `SalesController`. Routes `GET /sales`,
+`GET /sales/:id`, `POST /sales` (création DRAFT), `POST /sales/:id/confirm`,
+`POST /sales/:id/cancel` — pas de `PATCH`/`DELETE` (lignes immuables).
+
+**Décision structurante — prix figé côté serveur, jamais côté client** :
+`unitPriceExcludingTax`/`vatRateBasisPoints` de chaque ligne sont résolus
+depuis `Product` au moment de la création, le client ne transmet que
+`productId`/`quantity` — jamais de valeur monétaire acceptée du client
+(`CLAUDE.md` §6). Un changement de prix catalogue après coup n'altère jamais
+l'historique des ventes déjà créées. Pas de remise/prix personnalisé dans ce
+cycle.
+
+**Décision structurante — confirmation compose Stock plutôt que de dupliquer
+sa logique** : `StockRepository.applyMovement()` (extrait de
+`createMovement()`, module Stock) est réutilisé par `SalesRepository.confirm()`
+pour décrémenter chaque ligne `trackStock=true`, **dans la même transaction
+`Serializable`** que le passage à `CONFIRMED` — vente confirmée et stock
+décrémenté réussissent ou échouent ensemble ; 409 si une ligne dépasse le
+stock disponible. `StockModule` exporte désormais `StockRepository` pour
+cette composition cross-module (`SalesModule` l'importe).
+
+**Écart par rapport au gabarit** : aucun sur permissions/feature —
+`sales.read/create/update/delete` et l'entrée de menu `/app/sales`
+existaient déjà (anticipées Phases 2/7.2). `confirm`/`cancel` mappées sur
+`sales.update`/`sales.delete` (même patron que la désactivation logique de
+Produits mappée sur `products.delete`). Trois nouvelles clés `AuditAction`
+(`CREATE_SALE`, `CONFIRM_SALE`, `CANCEL_SALE`).
+
+**Sécurité appliquée** : permissions `sales.*`, feature de plan `sales`
+(booléenne, activée sur les 4 forfaits au seed),
+`FeatureGuard`/`SubscriptionAccessGuard`, RLS PostgreSQL forcée sur `sales`
+et `sale_lines` (policy distincte sur chaque table — RLS ne traverse pas une
+relation), audit log.
+
+**Tests** : `sales.repository.spec.ts` (instantané prix/TVA à la création,
+non-régression si le prix produit change ensuite, décrémentation de stock à
+la confirmation, 409 stock insuffisant, produit `trackStock=false` sans
+garde stock, rejet confirmation hors DRAFT, annulation limitée à DRAFT,
+rejet client/produit d'un autre tenant), `sales.integration.spec.ts` (cycle
+de vie complet create→confirm avec effet de bord stock vérifié directement
+via Prisma, 409 stock insuffisant, 400 lignes vides, 400 annulation d'une
+vente déjà confirmée, 403 permission manquante, 403 feature désactivée),
+`sales.tenant.spec.ts` (404 cross-tenant, liste jamais cross-tenant,
+`customerId`/`productId` d'un autre tenant rejetés en 404 — équivalent
+naturel du cas « enterpriseId forgé », deux variantes ici puisque le body a
+deux références externes), plus un cas ajouté à
+`tenant/tenant-isolation.tenant.spec.ts`.
+
+**Frontend** : `apps/web/src/app/app/sales/page.tsx` — remplace le
+placeholder `ComingSoon` : liste des ventes (recherche par client,
+filtre par statut, pagination), `SaleForm` (client + lignes dynamiques via
+`useFieldArray` de react-hook-form — première utilisation de ce hook dans le
+monorepo, réutilise `useCustomers`/`useProducts` existants pour les listes
+déroulantes), actions Confirmer/Annuler sur les ventes `DRAFT`, détail avec
+lignes et totaux HT/TVA/TTC affiché sous la liste après sélection.
+
+Vérifié par `pnpm typecheck`/`lint`/`test`/`test:tenant`/`build` (monorepo
+complet) et un build de production `apps/web` réel.

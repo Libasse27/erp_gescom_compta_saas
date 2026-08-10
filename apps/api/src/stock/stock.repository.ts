@@ -136,36 +136,7 @@ export class StockRepository {
   async createMovement(enterpriseId: string, input: CreateStockMovementInput): Promise<CreateMovementResult> {
     try {
       return await this.tenantPrisma.run(
-        async (tx) => {
-          const product = await tx.product.findUnique({ where: { id: input.productId } });
-          if (!product || product.enterpriseId !== enterpriseId) {
-            throw new NotFoundException("Produit introuvable");
-          }
-          if (!product.trackStock) {
-            throw new BadRequestException("Ce produit ne suit pas de stock");
-          }
-
-          const quantities = await this.aggregateQuantities(tx, enterpriseId, [input.productId]);
-          const currentQuantity = quantities.get(input.productId) ?? 0;
-          const delta = input.type === "OUT" ? -input.quantity : input.quantity;
-          const nextQuantity = currentQuantity + delta;
-
-          if (nextQuantity < 0) {
-            throw new ConflictException("Stock insuffisant");
-          }
-
-          const movement = await tx.stockMovement.create({
-            data: {
-              enterpriseId,
-              productId: input.productId,
-              type: input.type,
-              quantity: input.quantity,
-              note: input.note,
-            },
-          });
-
-          return { movement, quantityOnHand: nextQuantity };
-        },
+        (tx) => this.applyMovement(tx, enterpriseId, input),
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
     } catch (error) {
@@ -174,6 +145,48 @@ export class StockRepository {
       }
       throw error;
     }
+  }
+
+  // Exposé (pas privé) pour composition cross-module : SalesRepository.confirm()
+  // décrémente le stock de chaque ligne dans SA PROPRE transaction Serializable
+  // (elle doit rester atomique avec le passage de la vente à CONFIRMED), donc
+  // sans ouvrir une nouvelle transaction ici — juste la logique métier
+  // (garde stock négatif comprise) appliquée sur le `tx` de l'appelant. Le
+  // mapping P2034 -> 409 reste à la charge de l'appelant, qui connaît le
+  // contexte de sa propre transaction.
+  async applyMovement(
+    tx: Prisma.TransactionClient,
+    enterpriseId: string,
+    input: CreateStockMovementInput,
+  ): Promise<CreateMovementResult> {
+    const product = await tx.product.findUnique({ where: { id: input.productId } });
+    if (!product || product.enterpriseId !== enterpriseId) {
+      throw new NotFoundException("Produit introuvable");
+    }
+    if (!product.trackStock) {
+      throw new BadRequestException("Ce produit ne suit pas de stock");
+    }
+
+    const quantities = await this.aggregateQuantities(tx, enterpriseId, [input.productId]);
+    const currentQuantity = quantities.get(input.productId) ?? 0;
+    const delta = input.type === "OUT" ? -input.quantity : input.quantity;
+    const nextQuantity = currentQuantity + delta;
+
+    if (nextQuantity < 0) {
+      throw new ConflictException("Stock insuffisant");
+    }
+
+    const movement = await tx.stockMovement.create({
+      data: {
+        enterpriseId,
+        productId: input.productId,
+        type: input.type,
+        quantity: input.quantity,
+        note: input.note,
+      },
+    });
+
+    return { movement, quantityOnHand: nextQuantity };
   }
 
   private async findTrackedProductOrThrow(tx: Prisma.TransactionClient, enterpriseId: string, productId: string) {
