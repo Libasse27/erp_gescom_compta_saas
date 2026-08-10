@@ -138,3 +138,41 @@ export interface Sale {
   createdAt: string;
   updatedAt: string;
 }
+
+// Module ERP — Achats (Phase 8, module 6). Miroir structurel de Sale/SaleLine
+// (même cycle de vie, mêmes totaux calculés côté API), mais lié à Supplier
+// plutôt que Customer, et unitCostExcludingTax (au lieu de
+// unitPriceExcludingTax) : le coût d'achat est saisi à la création, pas
+// résolu depuis un prix catalogue (Product ne porte pas de prix d'achat).
+export type PurchaseStatus = "DRAFT" | "CONFIRMED" | "CANCELLED";
+
+export interface PurchaseLine {
+  id: string;
+  productId: string;
+  productCode: string;
+  productName: string;
+  quantity: number;
+  unitCostExcludingTax: number;
+  vatRateBasisPoints: number;
+  lineTotalExcludingTax: number;
+  lineTotalVat: number;
+  lineTotalIncludingTax: number;
+}
+
+export interface Purchase {
+  id: string;
+  enterpriseId: string;
+  supplierId: string;
+  supplierName: string;
+  status: PurchaseStatus;
+  purchaseDate: string;
+  notes: string | null;
+  confirmedAt: string | null;
+  cancelledAt: string | null;
+  totalExcludingTax: number;
+  totalVat: number;
+  totalIncludingTax: number;
+  lines: PurchaseLine[];
+  createdAt: string;
+  updatedAt: string;
+}

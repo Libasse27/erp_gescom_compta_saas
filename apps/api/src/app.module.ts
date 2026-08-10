@@ -12,6 +12,7 @@ import { PaymentsModule } from "./payments/payments.module";
 import { PlansModule } from "./plans/plans.module";
 import { ProductsModule } from "./products/products.module";
 import { ProvisioningModule } from "./provisioning/provisioning.module";
+import { PurchasesModule } from "./purchases/purchases.module";
 import { RolesModule } from "./roles/roles.module";
 import { SalesModule } from "./sales/sales.module";
 import { SettingsModule } from "./settings/settings.module";
@@ -49,6 +50,7 @@ import { GLOBAL_RATE_LIMIT } from "./common/rate-limit";
     ProductsModule,
     StockModule,
     SalesModule,
+    PurchasesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

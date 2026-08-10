@@ -112,6 +112,9 @@ enum AuditAction {
   CREATE_SALE
   CONFIRM_SALE
   CANCEL_SALE
+  CREATE_PURCHASE
+  CONFIRM_PURCHASE
+  CANCEL_PURCHASE
   CHANGE_PLAN
   PAYMENT
   SUSPEND_ACCOUNT
@@ -261,6 +264,8 @@ model Enterprise {
   stockMovements  StockMovement[]
   sales           Sale[]
   saleLines       SaleLine[]
+  purchases       Purchase[]
+  purchaseLines   PurchaseLine[]
 
   // NINEA/RCCM uniques par pays, nullables (non exigés à l'inscription,
   // voir docs/SPECIFICATIONS-SAAS.md §7 étape 2 — seul "Nom entreprise" est requis).
@@ -414,6 +419,8 @@ model Supplier {
   createdAt    DateTime     @default(now()) @map("created_at")
   updatedAt    DateTime     @updatedAt @map("updated_at")
 
+  purchases Purchase[]
+
   @@index([enterpriseId])
   @@index([enterpriseId, isActive])
   @@map("suppliers")
@@ -455,6 +462,7 @@ model Product {
 
   stockMovements StockMovement[]
   saleLines      SaleLine[]
+  purchaseLines  PurchaseLine[]
 
   @@unique([enterpriseId, code])
   @@index([enterpriseId])
@@ -577,6 +585,75 @@ model SaleLine {
   @@index([enterpriseId])
   @@index([saleId])
   @@map("sale_lines")
+}
+
+enum PurchaseStatus {
+  DRAFT
+  CONFIRMED
+  CANCELLED
+}
+
+// Module 6 de la Phase 8 : miroir structurel de Sale (même cycle de vie
+// DRAFT -> CONFIRMED | CANCELLED, CONFIRMED terminal, mêmes garanties RLS),
+// mais l'effet stock est inversé — confirm() incrémente le stock (mouvement
+// IN) au lieu de le décrémenter, voir PurchasesRepository.confirm. Pas de
+// facture fournisseur dans ce cycle, comme Sale n'anticipe pas la
+// Facturation client.
+// Aucun total stocké : calculé à la lecture à partir des lignes, même
+// principe que Sale.
+model Purchase {
+  id           String     @id @default(uuid()) @db.Uuid
+  enterpriseId String     @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
+  supplierId   String     @map("supplier_id") @db.Uuid
+  supplier     Supplier   @relation(fields: [supplierId], references: [id])
+
+  status       PurchaseStatus @default(DRAFT)
+  purchaseDate DateTime       @default(now()) @map("purchase_date")
+  notes        String?
+  confirmedAt  DateTime?      @map("confirmed_at")
+  cancelledAt  DateTime?      @map("cancelled_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  lines PurchaseLine[]
+
+  @@index([enterpriseId])
+  @@index([enterpriseId, status])
+  @@map("purchases")
+}
+
+// enterpriseId dupliqué depuis Purchase, même contrainte RLS que SaleLine.
+// unitCostExcludingTax est saisi par l'utilisateur à la création (contrairement
+// à SaleLine.unitPriceExcludingTax) : Product ne porte pas de prix d'achat
+// catalogue (voir schema.prisma, model Product — "Pas de purchasePrice dans
+// ce cycle"), le coût négocié varie légitimement par fournisseur/commande,
+// ce n'est pas une donnée qu'il faudrait protéger d'une falsification client
+// comme un prix de vente (CLAUDE.md §6 vise les données qui affectent
+// d'autres tenants ou la plateforme, pas le coût d'achat interne d'un
+// tenant sur ses propres données). vatRateBasisPoints reste résolu côté
+// serveur depuis Product, comme SaleLine : c'est un attribut catalogue, pas
+// négocié. Lignes immuables après création, comme SaleLine.
+model PurchaseLine {
+  id         String   @id @default(uuid()) @db.Uuid
+  purchaseId String   @map("purchase_id") @db.Uuid
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+
+  enterpriseId String     @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
+  productId    String     @map("product_id") @db.Uuid
+  product      Product    @relation(fields: [productId], references: [id])
+
+  quantity              Int
+  unitCostExcludingTax  Int @map("unit_cost_excluding_tax")
+  vatRateBasisPoints    Int @map("vat_rate_basis_points")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([enterpriseId])
+  @@index([purchaseId])
+  @@map("purchase_lines")
 }
 
 // ─────────────────────────────────────────────────────────────────────────
