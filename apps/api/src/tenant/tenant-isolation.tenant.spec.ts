@@ -151,6 +151,31 @@ describe("Tenant isolation (RLS + TenantContext)", () => {
     await prisma.supplier.deleteMany({ where: { enterpriseId: { in: [enterpriseA.id, enterpriseB.id] } } });
   });
 
+  it("scopes stock_movements to the current tenant (Phase 8, module Stock)", async () => {
+    const enterpriseA = await createEnterprise(`Tenant A ${randomUUID()}`);
+    const enterpriseB = await createEnterprise(`Tenant B ${randomUUID()}`);
+    const productA = await prisma.product.create({
+      data: { enterpriseId: enterpriseA.id, code: `SKU-${randomUUID()}`, name: "Produit A", sellingPriceExcludingTax: 1_000 },
+    });
+    const productB = await prisma.product.create({
+      data: { enterpriseId: enterpriseB.id, code: `SKU-${randomUUID()}`, name: "Produit B", sellingPriceExcludingTax: 1_000 },
+    });
+    await prisma.stockMovement.create({
+      data: { enterpriseId: enterpriseA.id, productId: productA.id, type: "IN", quantity: 10 },
+    });
+    await prisma.stockMovement.create({
+      data: { enterpriseId: enterpriseB.id, productId: productB.id, type: "IN", quantity: 10 },
+    });
+
+    const seenByA = await TenantContext.run({ tenantId: enterpriseA.id, userId: randomUUID(), isSuperAdmin: false }, () =>
+      tenantPrisma.run((tx) => tx.stockMovement.findMany()),
+    );
+    expect(seenByA.map((m) => m.enterpriseId)).toEqual([enterpriseA.id]);
+
+    await prisma.stockMovement.deleteMany({ where: { enterpriseId: { in: [enterpriseA.id, enterpriseB.id] } } });
+    await prisma.product.deleteMany({ where: { id: { in: [productA.id, productB.id] } } });
+  });
+
   it("erp_app_tenant is neither superuser nor RLS-bypassing, and does not own the tenant tables", async () => {
     const [role] = await prisma.$queryRaw<{ rolsuper: boolean; rolbypassrls: boolean }[]>`
       SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'erp_app_tenant'

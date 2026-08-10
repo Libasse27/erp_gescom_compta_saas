@@ -8,9 +8,9 @@
 Entités **plateforme** (`User`, `Enterprise`, RBAC, `Plan`, abonnement,
 paiement/facturation, audit, notifications), complétées depuis la Phase 8 par
 les entités **ERP** (tenant-scoped), module par module. `Customer` (§5bis),
-`Supplier` (§5ter) et `Product` (§5quater) sont les trois premiers modules ERP
-migrés ; les autres (ventes, achats, stocks, facturation, comptabilité,
-rapports) suivent le même patron.
+`Supplier` (§5ter), `Product` (§5quater) et `StockMovement` (§5quinquies)
+sont les quatre premiers modules ERP migrés ; les autres (ventes, achats,
+facturation, comptabilité, rapports) suivent le même patron.
 
 > Mise à jour Phase 3 (2026-08-09) : la Row Level Security est maintenant
 > active sur les tables listées ci-dessous — voir
@@ -35,6 +35,8 @@ erDiagram
     Enterprise ||--o{ Customer : "gere (Phase 8)"
     Enterprise ||--o{ Supplier : "gere (Phase 8)"
     Enterprise ||--o{ Product : "gere (Phase 8)"
+    Enterprise ||--o{ StockMovement : "gere (Phase 8)"
+    Product ||--o{ StockMovement : "mouvemente"
 
     User ||--o{ UserRole : "a"
     Role ||--o{ UserRole : "assigne a"
@@ -169,6 +171,48 @@ catalogue — modèle de champs différent, pas une copie :
   `clients.*`) — seules deux nouvelles clés `AuditAction` ont dû être créées
   (`CREATE_PRODUCT`, `DELETE_PRODUCT`).
 
+## 5quinquies. Module ERP — `StockMovement` (Phase 8, module 4)
+
+Contrairement à `Customer`/`Supplier`/`Product` (des fiches), Stock n'est pas
+une entité mais un **grand livre de mouvements** — écart structurant, pas une
+copie du gabarit précédent :
+
+- **Aucune quantité en stock stockée sur `Product`** : `StockMovement` est la
+  seule source de vérité, la quantité couramment en stock se **calcule** par
+  agrégation des mouvements (`groupBy` Prisma par `type`, sommes combinées en
+  application) — même principe que le TTC produit (§5quater, « jamais de
+  donnée dérivée stockée », `CLAUDE.md` §7).
+- **Append-only**, comme `AuditLog` : aucune route `PATCH`/`DELETE` sur un
+  mouvement ; une correction d'inventaire se fait via un nouveau mouvement
+  `type = ADJUSTMENT`, jamais en réécrivant l'historique.
+- `quantity` porte des règles différentes selon `type` (validées par
+  `.refine()` dans `packages/validation/src/stock.ts`) : magnitude positive
+  pour `IN`/`OUT` (le signe est porté par `type`, pas par la valeur — reste
+  lisible dans l'historique) ; delta signé non nul pour `ADJUSTMENT`.
+- **Garde stock jamais négatif**, à la création d'un mouvement : le
+  repository calcule le solde courant puis le nouveau solde dans la **même**
+  transaction, et rejette (409) si le résultat serait négatif. Cette
+  transaction utilise l'isolation `Serializable` (et non `ReadCommitted`, le
+  défaut des autres modules) — sous `ReadCommitted`, deux créations
+  concurrentes sur le même produit pourraient toutes deux lire le même solde
+  de départ et laisser passer un stock négatif ; Postgres fait alors échouer
+  l'une des deux transactions en conflit (erreur `40001` / Prisma `P2034`),
+  rattrapée en 409 par `StockRepository`. Voir
+  `apps/api/src/tenant/tenant-scoped-prisma.service.ts` (`run()` accepte
+  désormais un `isolationLevel` optionnel, rétrocompatible pour tous les
+  autres appelants).
+- Pas de `userId` sur le modèle : `AuditLog` (action `CREATE_STOCK_MOVEMENT`)
+  trace déjà l'auteur, inutile de le dupliquer.
+- Pas de `warehouseId`/notion d'entrepôt dans ce cycle : un seul stock
+  implicite par entreprise, aucun besoin multi-entrepôt exprimé (`CLAUDE.md`
+  §9) — à ajouter par migration si nécessaire plus tard.
+- Aucun écart de permissions/route : `stock.read/create/update/delete`
+  (`packages/permissions`) et l'entrée de menu `/app/stock` existaient déjà
+  (anticipées Phases 2/7.2). `stock.update`/`stock.delete` restent non
+  consommées par ce module (cohérent avec l'absence de routes
+  update/delete). Une seule nouvelle clé `AuditAction`
+  (`CREATE_STOCK_MOVEMENT`).
+
 ## 6. Abonnement
 
 - Historique complet : une `Enterprise` a plusieurs `Subscription` au fil du
@@ -231,15 +275,16 @@ catalogue — modèle de champs différent, pas une copie :
 - **RLS PostgreSQL** : active depuis la Phase 3 sur `enterprises`, `roles`,
   `user_roles`, `role_permissions`, `users`, `settings`, `notifications`,
   `subscriptions`, `subscription_events`, `payments`, `invoices`, `accounts`,
-  et depuis la Phase 8 sur `customers`, `suppliers` et `products` — voir
+  et depuis la Phase 8 sur `customers`, `suppliers`, `products` et
+  `stock_movements` — voir
   `docs/adr/0008-deux-roles-postgres-identite-vs-tenant.md`.
   `refresh_tokens`/`auth_tokens` en restent exclus (pas de colonne
   `enterpriseId`, isolation par unicité du hash) ; `audit_logs` aussi, tant
   qu'aucune lecture scopée tenant n'existe (même ADR).
-- **Tables ERP restantes** (`Sale`, `Purchase`, `Stock`, écritures
-  comptables…) : reste de la Phase 8, module par module —
-  `Customer`/`Supplier`/`Product` (§5bis/§5ter/§5quater) servent de patron :
-  tenant-scoped (`enterpriseId` + RLS) dès l'introduction de chaque nouveau
-  modèle.
+- **Tables ERP restantes** (`Sale`, `Purchase`, écritures comptables…) :
+  reste de la Phase 8, module par module —
+  `Customer`/`Supplier`/`Product`/`StockMovement`
+  (§5bis/§5ter/§5quater/§5quinquies) servent de patron : tenant-scoped
+  (`enterpriseId` + RLS) dès l'introduction de chaque nouveau modèle.
 - **Table de liaison multi-entreprise par utilisateur** : hors scope V1
   (ADR 0004) ; migration à prévoir si le besoin apparaît.

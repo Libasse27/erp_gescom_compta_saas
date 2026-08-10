@@ -193,3 +193,70 @@ composant `Checkbox`/`NumberInput` dédié n'existait déjà dans
 Vérifié par `pnpm typecheck`/`lint`/`test`/`test:tenant`/`build` (monorepo
 complet, 171 tests API dont 15 nouveaux pour Produits) et un build de
 production `apps/web` réel (page `/app/products` passée de 182 B à 5.31 kB).
+
+## Module Stock — réalisé (2026-08-10)
+
+**Classification** : à créer.
+
+**Écart structurant par rapport au gabarit** : contrairement à
+Clients/Fournisseurs/Produits (des fiches, CRUD + suppression logique),
+Stock n'est pas une entité mais un **grand livre de mouvements**. Aucune
+quantité en stock n'est stockée sur `Product` : elle se calcule par
+agrégation des `StockMovement` (`groupBy` Prisma par `type`), jamais stockée
+— même principe que le TTC produit (module Produits). `StockMovement` est
+append-only comme `AuditLog` : pas de route `PATCH`/`DELETE`, une correction
+d'inventaire se fait via un nouveau mouvement `ADJUSTMENT`. Voir
+`docs/database/SCHEMA.md` §5quinquies pour le détail des champs.
+
+**Backend** : `apps/api/src/stock/` — `StockRepository` (seul point d'accès
+Prisma) → `StockService` → `StockController`. Routes `GET /stock` (niveaux
+paginés), `GET /stock/:productId` (niveau d'un produit), `GET
+/stock/:productId/movements` (historique paginé), `POST /stock/movements`
+(création d'un mouvement) — pas de `PATCH`/`DELETE`.
+
+**Décision structurante propre à ce module — garde stock jamais négatif sous
+concurrence** : la création d'un mouvement calcule le solde courant puis le
+nouveau solde dans la même transaction et rejette (409) un résultat négatif.
+Sous l'isolation `ReadCommitted` (défaut des autres modules), deux créations
+concurrentes sur le même produit pourraient toutes deux lire le même solde
+de départ et laisser passer un stock négatif (race condition classique
+lecture-puis-écriture). Décision : élever cette transaction spécifique en
+isolation `Serializable`, qui fait échouer l'une des deux transactions en
+conflit côté Postgres (erreur `40001` / Prisma `P2034`), rattrapée en 409.
+`TenantScopedPrismaService.run()` (`apps/api/src/tenant/`) accepte
+désormais un `isolationLevel` optionnel pour cela — changement
+rétrocompatible, tous les autres appelants gardent `ReadCommitted` par
+défaut.
+
+**Écart par rapport au gabarit** : aucun sur les permissions/route
+(contrairement à Fournisseurs) — `stock.read/create/update/delete`
+(`packages/permissions`) et l'entrée de menu `/app/stock` existaient déjà
+(anticipées Phases 2/7.2). `stock.update`/`stock.delete` restent non
+consommées (pas de route update/delete). Une seule nouvelle clé
+`AuditAction` (`CREATE_STOCK_MOVEMENT`).
+
+**Sécurité appliquée** : permissions `stock.read`/`stock.create`, feature de
+plan `stock` (booléenne, activée sur les 4 forfaits au seed),
+`FeatureGuard`/`SubscriptionAccessGuard`, RLS PostgreSQL forcée sur
+`stock_movements`, audit log (`CREATE_STOCK_MOVEMENT`).
+
+**Tests** : `stock.repository.spec.ts` (agrégation multi-mouvements,
+rejet stock négatif, produit `trackStock=false` rejeté, isolation tenant sur
+l'agrégat, pas de N+1 sur la liste), `stock.integration.spec.ts` (CRUD
+mouvement, 400 quantité invalide, 400 produit sans suivi de stock, 409 stock
+insuffisant, 403 permission manquante, 403 feature désactivée),
+`stock.tenant.spec.ts` (404 cross-tenant, liste jamais cross-tenant,
+`productId` d'un autre tenant rejeté en 404 plutôt que scopé silencieusement
+— équivalent naturel du cas « `enterpriseId` forgé » des modules précédents,
+qui n'a pas de sens ici puisque Stock n'a pas de route de création de
+fiche), plus un cas ajouté à `tenant/tenant-isolation.tenant.spec.ts`.
+
+**Frontend** : `apps/web/src/app/app/stock/page.tsx` — remplace le
+placeholder `ComingSoon` : liste des niveaux de stock (recherche/pagination),
+`StockMovementForm` (choix du produit par `<select>` à plat sur les 100
+premiers produits suivis, pas de recherche async dans ce cycle — aucun
+composant de ce type n'existait déjà), historique paginé par produit affiché
+sous la liste après sélection.
+
+Vérifié par `pnpm typecheck`/`lint`/`test`/`test:tenant`/`build` (monorepo
+complet) et un build de production `apps/web` réel.

@@ -32,12 +32,26 @@ export class TenantScopedPrismaService implements OnModuleInit, OnModuleDestroy 
   // async (pas juste un `return`) pour que ce throw synchrone devienne bien
   // une Promise rejetée, pas une exception lancée avant même l'obtention
   // d'une Promise par l'appelant.
-  async run<T>(callback: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  // isolationLevel : ReadCommitted (défaut Postgres/Prisma) suffit pour les
+  // lectures/écritures indépendantes. À relever en Serializable uniquement
+  // quand une transaction fait lecture-puis-écriture d'un invariant partagé
+  // (ex. StockRepository.createMovement vérifie que le stock ne devient pas
+  // négatif) : sous ReadCommitted, deux transactions concurrentes sur le même
+  // produit liraient toutes les deux le solde d'avant, une race condition
+  // classique. Serializable fait échouer l'une des deux (Postgres, erreur
+  // 40001 / Prisma P2034) plutôt que de laisser passer un solde incohérent.
+  async run<T>(
+    callback: (tx: Prisma.TransactionClient) => Promise<T>,
+    options?: { isolationLevel?: Prisma.TransactionIsolationLevel },
+  ): Promise<T> {
     const tenantId = TenantContext.getRequiredTenantId();
 
-    return this.client.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
-      return callback(tx);
-    });
+    return this.client.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
+        return callback(tx);
+      },
+      options?.isolationLevel ? { isolationLevel: options.isolationLevel } : undefined,
+    );
   }
 }

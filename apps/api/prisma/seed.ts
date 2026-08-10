@@ -40,6 +40,7 @@ async function main() {
       { key: "clients", label: "Clients" },
       { key: "suppliers", label: "Fournisseurs" },
       { key: "products", label: "Produits" },
+      { key: "stock", label: "Stocks" },
     ];
     const erpFeatures = await Promise.all(
       ERP_FEATURES.map((feature) =>

@@ -108,6 +108,7 @@ enum AuditAction {
   DELETE_SUPPLIER
   CREATE_PRODUCT
   DELETE_PRODUCT
+  CREATE_STOCK_MOVEMENT
   CHANGE_PLAN
   PAYMENT
   SUSPEND_ACCOUNT
@@ -254,6 +255,7 @@ model Enterprise {
   customers       Customer[]
   suppliers       Supplier[]
   products        Product[]
+  stockMovements  StockMovement[]
 
   // NINEA/RCCM uniques par pays, nullables (non exigés à l'inscription,
   // voir docs/SPECIFICATIONS-SAAS.md §7 étape 2 — seul "Nom entreprise" est requis).
@@ -444,10 +446,55 @@ model Product {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  stockMovements StockMovement[]
+
   @@unique([enterpriseId, code])
   @@index([enterpriseId])
   @@index([enterpriseId, isActive])
   @@map("products")
+}
+
+enum StockMovementType {
+  IN
+  OUT
+  ADJUSTMENT
+}
+
+// Module 4 de la Phase 8 : contrairement à Customer/Supplier/Product (des
+// fiches), Stock n'est pas une entité mais un grand livre de mouvements —
+// pas de copie du gabarit précédent sur ce point. Aucune quantité en stock
+// n'est stockée sur Product : elle se calcule par agrégation des mouvements
+// (même principe que le TTC produit, §5quater — jamais de donnée dérivée
+// stockée, CLAUDE.md §7). StockMovement est donc la seule source de vérité,
+// append-only comme AuditLog : aucune route PATCH/DELETE, une correction se
+// fait via un nouveau mouvement ADJUSTMENT plutôt qu'en réécrivant
+// l'historique.
+// - quantity : magnitude positive pour IN/OUT (le signe est porté par
+//   `type`, pas par la valeur — reste lisible dans l'historique) ; delta
+//   signé (+/-, jamais 0) pour ADJUSTMENT, qui corrige un écart d'inventaire
+//   dans un sens ou l'autre.
+// - Pas de userId ici : AuditLog (action CREATE_STOCK_MOVEMENT) trace déjà
+//   l'auteur, inutile de le dupliquer sur un modèle métier.
+// - Pas de warehouseId : un seul stock implicite par entreprise dans ce
+//   cycle, aucun besoin multi-entrepôt exprimé (CLAUDE.md §9, pas de
+//   conception pour un besoin hypothétique) — à ajouter par migration si
+//   nécessaire plus tard.
+model StockMovement {
+  id           String     @id @default(uuid()) @db.Uuid
+  enterpriseId String     @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
+  productId    String     @map("product_id") @db.Uuid
+  product      Product    @relation(fields: [productId], references: [id])
+
+  type     StockMovementType
+  quantity Int
+  note     String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([enterpriseId, productId])
+  @@index([enterpriseId, createdAt])
+  @@map("stock_movements")
 }
 
 // ─────────────────────────────────────────────────────────────────────────

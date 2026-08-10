@@ -592,6 +592,21 @@ détail par module et la justification de l'ordre).
 > `test`/`test:tenant`/`build` (monorepo complet, 171 tests API) et un build
 > de production `apps/web` réel.
 
+> Réalisé (2026-08-10, module Stock) : quatrième module ERP, écart
+> structurant par rapport au gabarit Clients/Fournisseurs/Produits (des
+> fiches) — Stock est un grand livre de mouvements (`StockMovement`,
+> append-only comme `AuditLog`), aucune quantité stockée sur `Product`, la
+> quantité en stock se calcule par agrégation. Décision propre à ce module :
+> transaction `Serializable` (au lieu du `ReadCommitted` par défaut) pour la
+> création d'un mouvement, afin d'empêcher un stock négatif sous écritures
+> concurrentes sur le même produit — voir `docs/database/SCHEMA.md`
+> §5quinquies et `docs/AUDIT.md` pour le détail. Aucun écart sur les
+> permissions/route, contrairement à Fournisseurs. Vérifié par
+> `stock.repository.spec.ts`, `stock.integration.spec.ts`,
+> `stock.tenant.spec.ts`, un cas ajouté à `tenant-isolation.tenant.spec.ts`,
+> `pnpm typecheck`/`lint`/`test`/`test:tenant`/`build` (monorepo complet) et
+> un build de production `apps/web` réel.
+
 ---
 
 ### PHASE 9 — Mobile et Desktop

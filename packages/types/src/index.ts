@@ -70,3 +70,29 @@ export interface Product {
   createdAt: string;
   updatedAt: string;
 }
+
+// Module ERP — Stock (Phase 8, module 4). Contrairement à
+// Customer/Supplier/Product (des fiches), pas une entité mais un grand
+// livre de mouvements : StockMovement est la seule source de vérité,
+// append-only (pas de champ quantité stocké sur Product). StockLevel est la
+// vue calculée (agrégation des mouvements) consommée par la liste
+// GET /stock, pas un modèle Prisma.
+export type StockMovementType = "IN" | "OUT" | "ADJUSTMENT";
+
+export interface StockMovement {
+  id: string;
+  enterpriseId: string;
+  productId: string;
+  type: StockMovementType;
+  quantity: number;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface StockLevel {
+  productId: string;
+  code: string;
+  name: string;
+  unit: string;
+  quantityOnHand: number;
+}
