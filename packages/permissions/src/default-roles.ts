@@ -21,6 +21,7 @@ const ALL_READ: PermissionKey[] = [
   "products.read",
   "sales.read",
   "purchases.read",
+  "invoicing.read",
   "stock.read",
   "accounting.read",
   "reports.read",
@@ -47,6 +48,10 @@ const ALL_PERMISSIONS: PermissionKey[] = [
   "purchases.create",
   "purchases.update",
   "purchases.delete",
+  "invoicing.read",
+  "invoicing.create",
+  "invoicing.update",
+  "invoicing.delete",
   "stock.read",
   "stock.create",
   "stock.update",
@@ -66,9 +71,13 @@ const ALL_PERMISSIONS: PermissionKey[] = [
 // dans son entreprise (docs/SPECIFICATIONS-SAAS.md §12).
 export const DEFAULT_ROLE_PERMISSIONS: Record<DefaultRoleName, PermissionKey[]> = {
   ADMIN: ALL_PERMISSIONS,
-  COMPTABLE: ["accounting.read", "accounting.create", "accounting.update", "reports.read", "clients.read", "suppliers.read", "sales.read", "purchases.read"],
-  COMMERCIAL: ["clients.read", "clients.create", "clients.update", "sales.read", "sales.create", "sales.update", "products.read", "reports.read"],
-  CAISSIER: ["sales.read", "sales.create", "stock.read", "clients.read"],
+  COMPTABLE: [
+    "accounting.read", "accounting.create", "accounting.update", "reports.read",
+    "clients.read", "suppliers.read", "sales.read", "purchases.read",
+    "invoicing.read", "invoicing.create", "invoicing.update", "invoicing.delete",
+  ],
+  COMMERCIAL: ["clients.read", "clients.create", "clients.update", "sales.read", "sales.create", "sales.update", "invoicing.read", "invoicing.create", "products.read", "reports.read"],
+  CAISSIER: ["sales.read", "sales.create", "invoicing.read", "invoicing.create", "invoicing.update", "stock.read", "clients.read"],
   MAGASINIER: ["stock.read", "stock.create", "stock.update", "stock.delete", "products.read", "products.update", "purchases.read", "suppliers.read"],
   GESTIONNAIRE: [
     "clients.read", "clients.create", "clients.update", "clients.delete",
@@ -76,6 +85,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<DefaultRoleName, PermissionKey[]> 
     "products.read", "products.create", "products.update", "products.delete",
     "sales.read", "sales.create", "sales.update", "sales.delete",
     "purchases.read", "purchases.create", "purchases.update", "purchases.delete",
+    "invoicing.read", "invoicing.create", "invoicing.update", "invoicing.delete",
     "stock.read", "stock.create", "stock.update", "stock.delete",
     "accounting.read", "reports.read",
   ],

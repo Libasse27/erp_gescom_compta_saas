@@ -14,6 +14,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/app/products", label: "Produits", permission: "products.read" },
   { href: "/app/sales", label: "Ventes", permission: "sales.read" },
   { href: "/app/purchases", label: "Achats", permission: "purchases.read" },
+  { href: "/app/invoicing", label: "Facturation", permission: "invoicing.read" },
   { href: "/app/stock", label: "Stocks", permission: "stock.read" },
   { href: "/app/accounting", label: "Comptabilité", permission: "accounting.read" },
   { href: "/app/reports", label: "Rapports", permission: "reports.read" },

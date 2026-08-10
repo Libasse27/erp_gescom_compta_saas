@@ -115,6 +115,8 @@ enum AuditAction {
   CREATE_PURCHASE
   CONFIRM_PURCHASE
   CANCEL_PURCHASE
+  MARK_INVOICE_PAID
+  VOID_INVOICE
   CHANGE_PLAN
   PAYMENT
   SUSPEND_ACCOUNT
@@ -266,6 +268,8 @@ model Enterprise {
   saleLines       SaleLine[]
   purchases       Purchase[]
   purchaseLines   PurchaseLine[]
+  salesInvoices       SalesInvoice[]
+  salesInvoiceCounter SalesInvoiceCounter?
 
   // NINEA/RCCM uniques par pays, nullables (non exigés à l'inscription,
   // voir docs/SPECIFICATIONS-SAAS.md §7 étape 2 — seul "Nom entreprise" est requis).
@@ -548,7 +552,8 @@ model Sale {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  lines SaleLine[]
+  lines   SaleLine[]
+  invoice SalesInvoice?
 
   @@index([enterpriseId])
   @@index([enterpriseId, status])
@@ -654,6 +659,61 @@ model PurchaseLine {
   @@index([enterpriseId])
   @@index([purchaseId])
   @@map("purchase_lines")
+}
+
+// Module 7 de la Phase 8 : transforme une Sale CONFIRMED en document légal
+// (voir schema.prisma, model Sale — "la Facturation transformera une vente
+// confirmée en document légal"). Une facture par vente (saleId unique) :
+// pas de facturation partielle/multiple dans ce cycle. Pas de lignes propres
+// (SalesInvoiceLine) : Sale.lines est déjà un instantané immuable une fois
+// CONFIRMED, la dupliquer ici créerait une seconde source de vérité pour la
+// même donnée — la vue de lecture recompose les lignes depuis la vente liée
+// (voir InvoicingRepository.toInvoiceView).
+// Réutilise l'enum InvoiceStatus (déjà défini pour la facturation SaaS
+// plateforme, model Invoice) plutôt que d'en dupliquer un identique : DRAFT
+// n'est jamais utilisé par ce module (une facture est émise directement à la
+// création, jamais éditée avant), ISSUED est l'état initial.
+model SalesInvoice {
+  id           String     @id @default(uuid()) @db.Uuid
+  enterpriseId String     @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
+  saleId       String     @unique @map("sale_id") @db.Uuid
+  sale         Sale       @relation(fields: [saleId], references: [id])
+
+  // Formatée à l'émission (ex: "FACT-<8 premiers caractères enterpriseId>-000123"),
+  // construite à partir de SalesInvoiceCounter — séquence dédiée à ce module,
+  // distincte d'InvoiceCounter (facturation SaaS plateforme, Phase 5) : deux
+  // domaines de numérotation légale indépendants ne doivent jamais partager
+  // un compteur.
+  number        String        @unique
+  status        InvoiceStatus @default(ISSUED)
+  issuedAt      DateTime      @default(now()) @map("issued_at")
+  paidAt        DateTime?     @map("paid_at")
+  voidedAt      DateTime?     @map("voided_at")
+  // Instantané au moment de l'émission (identité légale de l'entreprise
+  // émettrice + du client) : une correction ultérieure du NINEA de
+  // l'entreprise ou du client ne doit jamais altérer une facture déjà émise.
+  legalMentions String        @map("legal_mentions")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([enterpriseId])
+  @@index([enterpriseId, status])
+  @@map("sales_invoices")
+}
+
+// Compteur atomique par entreprise, même patron qu'InvoiceCounter
+// (apps/api/src/payments/invoice-generation.service.ts) : incrémenté via
+// `INSERT ... ON CONFLICT (enterprise_id) DO UPDATE ... RETURNING` dans la
+// même transaction que la création de SalesInvoice.
+model SalesInvoiceCounter {
+  enterpriseId String     @id @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise @relation(fields: [enterpriseId], references: [id])
+  lastNumber   Int        @default(0) @map("last_number")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  @@map("sales_invoice_counters")
 }
 
 // ─────────────────────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import { AuditLogModule } from "./common/audit/audit-log.module";
 import { AuthModule } from "./auth/auth.module";
 import { CustomersModule } from "./customers/customers.module";
 import { EntitlementsModule } from "./entitlements/entitlements.module";
+import { InvoicingModule } from "./invoicing/invoicing.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { OnboardingModule } from "./onboarding/onboarding.module";
 import { PaymentsModule } from "./payments/payments.module";
@@ -51,6 +52,7 @@ import { GLOBAL_RATE_LIMIT } from "./common/rate-limit";
     StockModule,
     SalesModule,
     PurchasesModule,
+    InvoicingModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

@@ -43,6 +43,7 @@ async function main() {
       { key: "stock", label: "Stocks" },
       { key: "sales", label: "Ventes" },
       { key: "purchases", label: "Achats" },
+      { key: "invoicing", label: "Facturation" },
     ];
     const erpFeatures = await Promise.all(
       ERP_FEATURES.map((feature) =>

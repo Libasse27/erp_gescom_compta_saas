@@ -176,3 +176,44 @@ export interface Purchase {
   createdAt: string;
   updatedAt: string;
 }
+
+// Module ERP — Facturation (Phase 8, module 7). Transforme une Sale
+// CONFIRMED en document légal : pas de lignes propres, InvoiceLine reprend
+// simplement la forme de SaleLine (les lignes viennent de la vente liée,
+// jamais ressaisies — voir schema.prisma, model SalesInvoice). "DRAFT" de
+// l'enum Prisma InvoiceStatus n'existe pas ici : une facture est émise
+// directement à la création.
+export type SalesInvoiceStatus = "ISSUED" | "PAID" | "VOID";
+
+export interface SalesInvoiceLine {
+  id: string;
+  productId: string;
+  productCode: string;
+  productName: string;
+  quantity: number;
+  unitPriceExcludingTax: number;
+  vatRateBasisPoints: number;
+  lineTotalExcludingTax: number;
+  lineTotalVat: number;
+  lineTotalIncludingTax: number;
+}
+
+export interface SalesInvoice {
+  id: string;
+  enterpriseId: string;
+  saleId: string;
+  customerId: string;
+  customerName: string;
+  number: string;
+  status: SalesInvoiceStatus;
+  issuedAt: string;
+  paidAt: string | null;
+  voidedAt: string | null;
+  legalMentions: string;
+  totalExcludingTax: number;
+  totalVat: number;
+  totalIncludingTax: number;
+  lines: SalesInvoiceLine[];
+  createdAt: string;
+  updatedAt: string;
+}

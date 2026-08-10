@@ -27,6 +27,11 @@ export const PERMISSION_KEYS = [
   "purchases.update",
   "purchases.delete",
 
+  "invoicing.read",
+  "invoicing.create",
+  "invoicing.update",
+  "invoicing.delete",
+
   "stock.read",
   "stock.create",
   "stock.update",
