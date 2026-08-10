@@ -17,6 +17,7 @@ export type DefaultRoleName = (typeof DEFAULT_ROLE_NAMES)[number];
 
 const ALL_READ: PermissionKey[] = [
   "clients.read",
+  "suppliers.read",
   "products.read",
   "sales.read",
   "purchases.read",
@@ -30,6 +31,10 @@ const ALL_PERMISSIONS: PermissionKey[] = [
   "clients.create",
   "clients.update",
   "clients.delete",
+  "suppliers.read",
+  "suppliers.create",
+  "suppliers.update",
+  "suppliers.delete",
   "products.read",
   "products.create",
   "products.update",
@@ -61,12 +66,13 @@ const ALL_PERMISSIONS: PermissionKey[] = [
 // dans son entreprise (docs/SPECIFICATIONS-SAAS.md §12).
 export const DEFAULT_ROLE_PERMISSIONS: Record<DefaultRoleName, PermissionKey[]> = {
   ADMIN: ALL_PERMISSIONS,
-  COMPTABLE: ["accounting.read", "accounting.create", "accounting.update", "reports.read", "clients.read", "sales.read", "purchases.read"],
+  COMPTABLE: ["accounting.read", "accounting.create", "accounting.update", "reports.read", "clients.read", "suppliers.read", "sales.read", "purchases.read"],
   COMMERCIAL: ["clients.read", "clients.create", "clients.update", "sales.read", "sales.create", "sales.update", "products.read", "reports.read"],
   CAISSIER: ["sales.read", "sales.create", "stock.read", "clients.read"],
-  MAGASINIER: ["stock.read", "stock.create", "stock.update", "stock.delete", "products.read", "products.update", "purchases.read"],
+  MAGASINIER: ["stock.read", "stock.create", "stock.update", "stock.delete", "products.read", "products.update", "purchases.read", "suppliers.read"],
   GESTIONNAIRE: [
     "clients.read", "clients.create", "clients.update", "clients.delete",
+    "suppliers.read", "suppliers.create", "suppliers.update", "suppliers.delete",
     "products.read", "products.create", "products.update", "products.delete",
     "sales.read", "sales.create", "sales.update", "sales.delete",
     "purchases.read", "purchases.create", "purchases.update", "purchases.delete",

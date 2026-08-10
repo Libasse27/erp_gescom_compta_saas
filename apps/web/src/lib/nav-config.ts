@@ -10,6 +10,7 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { href: "/app", label: "Vue générale", permission: null },
   { href: "/app/clients", label: "Clients", permission: "clients.read" },
+  { href: "/app/suppliers", label: "Fournisseurs", permission: "suppliers.read" },
   { href: "/app/products", label: "Produits", permission: "products.read" },
   { href: "/app/sales", label: "Ventes", permission: "sales.read" },
   { href: "/app/purchases", label: "Achats", permission: "purchases.read" },

@@ -558,6 +558,26 @@ détail par module et la justification de l'ordre).
 > `?isActive=false` — remplacé par un `z.enum(...).transform(...)` explicite,
 > couvert par un test de régression.
 
+> Réalisé (2026-08-10, module Fournisseurs) : deuxième module ERP, copie
+> conforme du gabarit Clients (modèle `Supplier` tenant-scoped, RLS forcée,
+> repository/service/controller, feature de plan `suppliers`, suppression
+> toujours logique) — voir `docs/database/SCHEMA.md` §5ter et `docs/AUDIT.md`
+> pour le détail. Deux écarts par rapport au gabarit : le catalogue de
+> permissions (Phase 2) n'avait pas de clé fournisseur, ajout de
+> `suppliers.read/create/update/delete` dans `packages/permissions`
+> (`permission-keys.ts` + `default-roles.ts`) ; ni le menu ni la route
+> `/app/suppliers` n'existaient (contrairement à Clients, déjà posés en
+> Phase 7.2) — les deux créés. Vérifié par `suppliers.integration.spec.ts`,
+> `suppliers.tenant.spec.ts`, `suppliers.repository.spec.ts`, un cas ajouté à
+> `tenant/tenant-isolation.tenant.spec.ts`, `pnpm typecheck`/`lint`/`test`/
+> `test:tenant`/`build` (monorepo complet). Bug d'environnement rencontré
+> (hors périmètre, non corrigé ici) : `apps/api/tsconfig.json`
+> (`ignoreDeprecations`) et `ts-node` (`prisma db seed`) montrent une
+> incohérence de résolution de version TypeScript dans le monorepo — détail
+> dans `docs/AUDIT.md`, module Fournisseurs ; probablement lié au bug
+> `pnpm dev`/`pnpm start` déjà documenté ci-dessous, à trancher ensemble via
+> un ADR avant la Phase 10.
+
 ---
 
 ### PHASE 9 — Mobile et Desktop

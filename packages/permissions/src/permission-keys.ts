@@ -7,6 +7,11 @@ export const PERMISSION_KEYS = [
   "clients.update",
   "clients.delete",
 
+  "suppliers.read",
+  "suppliers.create",
+  "suppliers.update",
+  "suppliers.delete",
+
   "products.read",
   "products.create",
   "products.update",

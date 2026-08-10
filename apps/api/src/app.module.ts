@@ -15,6 +15,7 @@ import { RolesModule } from "./roles/roles.module";
 import { SettingsModule } from "./settings/settings.module";
 import { SubscriptionsModule } from "./subscriptions/subscriptions.module";
 import { SuperAdminModule } from "./super-admin/super-admin.module";
+import { SuppliersModule } from "./suppliers/suppliers.module";
 import { TenantModule } from "./tenant/tenant.module";
 import { TenantContextMiddleware } from "./tenant/tenant-context.middleware";
 import { UsersModule } from "./users/users.module";
@@ -41,6 +42,7 @@ import { GLOBAL_RATE_LIMIT } from "./common/rate-limit";
     SuperAdminModule,
     OnboardingModule,
     CustomersModule,
+    SuppliersModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

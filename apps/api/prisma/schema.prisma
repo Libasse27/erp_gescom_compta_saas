@@ -103,6 +103,9 @@ enum AuditAction {
   DELETE_CLIENT
   CREATE_CUSTOMER
   UPDATE_CUSTOMER
+  CREATE_SUPPLIER
+  UPDATE_SUPPLIER
+  DELETE_SUPPLIER
   CHANGE_PLAN
   PAYMENT
   SUSPEND_ACCOUNT
@@ -247,6 +250,7 @@ model Enterprise {
   accounts       Account[]
   onboardingState OnboardingState?
   customers       Customer[]
+  suppliers       Supplier[]
 
   // NINEA/RCCM uniques par pays, nullables (non exigés à l'inscription,
   // voir docs/SPECIFICATIONS-SAAS.md §7 étape 2 — seul "Nom entreprise" est requis).
@@ -339,7 +343,7 @@ model Account {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Module ERP — Clients (Phase 8, premier module métier migré)
+// Module ERP — Clients / Fournisseurs (Phase 8, modules 1 et 2)
 // ─────────────────────────────────────────────────────────────────────────
 
 // Suppression toujours logique (isActive=false) : les futurs modules Ventes
@@ -371,6 +375,36 @@ model Customer {
   @@index([enterpriseId])
   @@index([enterpriseId, isActive])
   @@map("customers")
+}
+
+// Copie conforme de Customer (module 2 de la Phase 8) : même besoins,
+// mêmes garanties (RLS, suppression logique). Réutilise CustomerType
+// (INDIVIDUAL/COMPANY) — un fournisseur individuel/entreprise est le même
+// concept que pour un client, dupliquer l'enum créerait deux sources de
+// vérité pour la même distinction.
+model Supplier {
+  id           String       @id @default(uuid()) @db.Uuid
+  enterpriseId String       @map("enterprise_id") @db.Uuid
+  enterprise   Enterprise   @relation(fields: [enterpriseId], references: [id])
+
+  type         CustomerType @default(COMPANY)
+  name         String
+  email        String?
+  phone        String?
+  address      String?
+  city         String?
+  country      String       @default("Sénégal")
+  ninea        String?
+  rccm         String?
+  notes        String?
+  isActive     Boolean      @default(true) @map("is_active")
+
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  @@index([enterpriseId])
+  @@index([enterpriseId, isActive])
+  @@map("suppliers")
 }
 
 // ─────────────────────────────────────────────────────────────────────────

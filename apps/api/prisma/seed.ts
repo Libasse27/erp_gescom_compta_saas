@@ -32,14 +32,19 @@ async function main() {
       update: {},
     });
 
-    // Feature "clients" (Phase 8) : booléenne, active sur les 4 forfaits —
-    // pas de quota chiffré tant que la grille tarifaire réelle des limites
-    // ERP n'est pas validée (docs/PROMPT-MAITRE-SAAS.md Phase 8, module Clients).
-    const clientsFeature = await prisma.feature.upsert({
-      where: { key: "clients" },
-      create: { key: "clients", label: "Clients" },
-      update: {},
-    });
+    // Features booléennes des modules ERP (Phase 8), une entrée par module
+    // migré, toutes activées sur les 4 forfaits — pas de quota chiffré tant
+    // que la grille tarifaire réelle des limites ERP n'est pas validée
+    // (docs/PROMPT-MAITRE-SAAS.md Phase 8).
+    const ERP_FEATURES = [
+      { key: "clients", label: "Clients" },
+      { key: "suppliers", label: "Fournisseurs" },
+    ];
+    const erpFeatures = await Promise.all(
+      ERP_FEATURES.map((feature) =>
+        prisma.feature.upsert({ where: { key: feature.key }, create: feature, update: {} }),
+      ),
+    );
 
     for (const planData of PLANS) {
       const { maxUsers, ...data } = planData;
@@ -53,11 +58,13 @@ async function main() {
         create: { planId: plan.id, limitId: usersLimit.id, value: maxUsers },
         update: { value: maxUsers },
       });
-      await prisma.planFeature.upsert({
-        where: { planId_featureId: { planId: plan.id, featureId: clientsFeature.id } },
-        create: { planId: plan.id, featureId: clientsFeature.id, enabled: true },
-        update: { enabled: true },
-      });
+      for (const feature of erpFeatures) {
+        await prisma.planFeature.upsert({
+          where: { planId_featureId: { planId: plan.id, featureId: feature.id } },
+          create: { planId: plan.id, featureId: feature.id, enabled: true },
+          update: { enabled: true },
+        });
+      }
     }
     console.log(`Catalogue de forfaits synchronisé (${PLANS.length} forfaits).`);
   } finally {

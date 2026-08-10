@@ -26,3 +26,24 @@ export interface Customer {
   createdAt: string;
   updatedAt: string;
 }
+
+// Module ERP — Fournisseurs (Phase 8, module 2). Copie conforme de Customer,
+// réutilise CustomerType (INDIVIDUAL/COMPANY) — même distinction, pas de
+// SupplierType dupliqué.
+export interface Supplier {
+  id: string;
+  enterpriseId: string;
+  type: CustomerType;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  city: string | null;
+  country: string;
+  ninea: string | null;
+  rccm: string | null;
+  notes: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}

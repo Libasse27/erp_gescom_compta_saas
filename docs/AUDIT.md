@@ -73,3 +73,64 @@ silencieusement inversé le filtre `?isActive=false` (`Boolean("false") ===
 true` en JS). Remplacé par un `z.enum(["true","false"]).transform(...)`
 explicite ; couvert par un test de régression dans
 `customers.integration.spec.ts`.
+
+## Module Fournisseurs — réalisé (2026-08-10)
+
+**Classification** : à créer.
+
+**Modèle** : `Supplier` (`apps/api/prisma/schema.prisma`), copie conforme de
+`Customer` — voir `docs/database/SCHEMA.md` §5ter.
+
+**Backend** : `apps/api/src/suppliers/` — même patron en couches que
+`customers/` (`SuppliersRepository` → `SuppliersService` →
+`SuppliersController`). Routes `GET/POST /suppliers`,
+`GET/PATCH/DELETE /suppliers/:id` (DELETE = suppression logique).
+
+**Écart par rapport au gabarit Clients** : le catalogue de permissions
+(Phase 2) n'avait pas de clé dédiée aux fournisseurs — ajout de
+`suppliers.read/create/update/delete` dans `packages/permissions`
+(`permission-keys.ts` + `default-roles.ts`, `ADMIN`/`GESTIONNAIRE` en accès
+complet, `MAGASINIER`/`COMPTABLE`/`LECTEUR` en lecture seule, ni
+`COMMERCIAL` ni `CAISSIER` — cohérent avec leur absence de `purchases.*`).
+De même, ni le menu (`apps/web/src/lib/nav-config.ts`) ni la route
+`apps/web/src/app/app/` n'avaient d'entrée "Fournisseurs" — les deux ont dû
+être créées, contrairement à Clients qui avait déjà son entrée + son
+placeholder `ComingSoon` posés en Phase 7.2.
+
+**Sécurité appliquée** : identique au module Clients — permissions
+`suppliers.*`, feature de plan `suppliers` (booléenne, activée sur les 4
+forfaits au seed), `FeatureGuard`/`SubscriptionAccessGuard`, RLS PostgreSQL
+forcée sur `suppliers`, audit log (`CREATE_SUPPLIER`, `UPDATE_SUPPLIER`,
+`DELETE_SUPPLIER` — trois nouvelles clés `AuditAction`, contrairement à
+Clients qui avait pu réutiliser `DELETE_CLIENT` déjà présente depuis la
+Phase 1).
+
+**Décisions structurantes** : mêmes choix que Clients — suppression toujours
+logique, pas de quota chiffré dans ce cycle, NINEA/RCCM format libre.
+Réutilise l'enum Prisma `CustomerType` (INDIVIDUAL/COMPANY) plutôt que d'en
+dupliquer un `SupplierType` identique.
+
+**Tests** : `suppliers.integration.spec.ts`, `suppliers.tenant.spec.ts`,
+`suppliers.repository.spec.ts` (copies conformes des specs Clients, mêmes
+critères), plus un cas ajouté à `tenant/tenant-isolation.tenant.spec.ts`.
+
+**Frontend** : `apps/web/src/app/app/suppliers/page.tsx` (nouveau, pas de
+`ComingSoon` à remplacer) — copie de `clients/page.tsx`, entrée de menu
+ajoutée dans `nav-config.ts` juste après Clients.
+
+**Bug d'environnement rencontré (hors périmètre du module, non corrigé ici)** :
+`apps/api/tsconfig.json` (`ignoreDeprecations`) oscille entre les valeurs
+`"5.0"` et `"6.0"` selon l'outil qui l'inspecte — `tsc --noEmit` (utilisé par
+`pnpm typecheck` et `nest build`) n'accepte que `"5.0"` avec la version de
+TypeScript actuellement résolue par le monorepo, alors qu'un diagnostic
+d'éditeur suggère `"6.0"`. Appliquer `"6.0"` casse `pnpm typecheck`.
+Séparément, `ts-node` (utilisé par `prisma db seed` et
+`create-super-admin.ts`) échoue avec `TS5103 Invalid value for
+'--ignoreDeprecations'` quelle que soit la valeur — probablement une
+résolution de `typescript` différente entre `ts-node` et `tsc` dans ce
+monorepo pnpm. Contourné ponctuellement pour ce module en insérant les lignes
+`Feature`/`PlanFeature` du seed directement en SQL (`prisma db execute`) sur
+la base de dev, sans modifier `seed.ts` ni la config. À trancher via un ADR
+dédié, dans le même esprit que le bug `pnpm dev`/`pnpm start` déjà documenté
+en Phase 10 — les deux sont probablement liés (résolution de version
+TypeScript incohérente entre les différents exécuteurs du monorepo).

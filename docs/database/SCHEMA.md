@@ -7,9 +7,10 @@
 
 Entités **plateforme** (`User`, `Enterprise`, RBAC, `Plan`, abonnement,
 paiement/facturation, audit, notifications), complétées depuis la Phase 8 par
-les entités **ERP** (tenant-scoped), module par module. `Customer` (§5bis)
-est le premier module ERP migré ; les autres (produits, ventes, achats,
-stocks, facturation, comptabilité, rapports) suivent le même patron.
+les entités **ERP** (tenant-scoped), module par module. `Customer` (§5bis) et
+`Supplier` (§5ter) sont les deux premiers modules ERP migrés ; les autres
+(produits, ventes, achats, stocks, facturation, comptabilité, rapports)
+suivent le même patron.
 
 > Mise à jour Phase 3 (2026-08-09) : la Row Level Security est maintenant
 > active sur les tables listées ci-dessous — voir
@@ -32,6 +33,7 @@ erDiagram
     Enterprise ||--o{ Setting : "configure"
     Enterprise ||--o{ Notification : "recoit"
     Enterprise ||--o{ Customer : "gere (Phase 8)"
+    Enterprise ||--o{ Supplier : "gere (Phase 8)"
 
     User ||--o{ UserRole : "a"
     Role ||--o{ UserRole : "assigne a"
@@ -125,6 +127,21 @@ erDiagram
   `@RequiresFeature` (Phase 4, jusque-là seulement testé directement, jamais
   posé sur une route). Pas de quota chiffré (`Limit`) dans ce cycle.
 
+## 5ter. Module ERP — `Supplier` (Phase 8, module 2)
+
+Copie conforme de `Customer` (§5bis) — mêmes garanties structurelles (RLS
+forcée, suppression toujours logique, `CustomerType` réutilisé sans
+duplication). Deux écarts seulement par rapport au gabarit Clients :
+
+- Permissions dédiées `suppliers.read/create/update/delete`, ajoutées au
+  catalogue `packages/permissions` (absent depuis la Phase 2, contrairement à
+  `clients.*` qui existait déjà) — décision : pas de réutilisation de
+  `purchases.*`, qui mélangerait deux ressources distinctes.
+- Trois nouvelles clés `AuditAction` (`CREATE_SUPPLIER`, `UPDATE_SUPPLIER`,
+  `DELETE_SUPPLIER`) : contrairement à Clients qui avait pu réutiliser
+  `DELETE_CLIENT` (déjà présente depuis la Phase 1), aucune clé fournisseur
+  n'existait.
+
 ## 6. Abonnement
 
 - Historique complet : une `Enterprise` a plusieurs `Subscription` au fil du
@@ -187,14 +204,14 @@ erDiagram
 - **RLS PostgreSQL** : active depuis la Phase 3 sur `enterprises`, `roles`,
   `user_roles`, `role_permissions`, `users`, `settings`, `notifications`,
   `subscriptions`, `subscription_events`, `payments`, `invoices`, `accounts`,
-  et depuis la Phase 8 sur `customers` — voir
+  et depuis la Phase 8 sur `customers` et `suppliers` — voir
   `docs/adr/0008-deux-roles-postgres-identite-vs-tenant.md`.
   `refresh_tokens`/`auth_tokens` en restent exclus (pas de colonne
   `enterpriseId`, isolation par unicité du hash) ; `audit_logs` aussi, tant
   qu'aucune lecture scopée tenant n'existe (même ADR).
 - **Tables ERP restantes** (`Product`, `Sale`, `Purchase`, `Stock`,
-  écritures comptables…) : reste de la Phase 8, module par module — `Customer`
-  (§5bis) sert de patron : tenant-scoped (`enterpriseId` + RLS) dès
-  l'introduction de chaque nouveau modèle.
+  écritures comptables…) : reste de la Phase 8, module par module —
+  `Customer`/`Supplier` (§5bis/§5ter) servent de patron : tenant-scoped
+  (`enterpriseId` + RLS) dès l'introduction de chaque nouveau modèle.
 - **Table de liaison multi-entreprise par utilisateur** : hors scope V1
   (ADR 0004) ; migration à prévoir si le besoin apparaît.
