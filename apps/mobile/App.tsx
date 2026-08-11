@@ -14,6 +14,9 @@ import { LoginScreen } from "./src/screens/LoginScreen";
 import { MfaVerifyScreen } from "./src/screens/MfaVerifyScreen";
 import { ProductFormScreen } from "./src/screens/ProductFormScreen";
 import { ProductsListScreen } from "./src/screens/ProductsListScreen";
+import { StockLevelsScreen } from "./src/screens/StockLevelsScreen";
+import { StockMovementFormScreen } from "./src/screens/StockMovementFormScreen";
+import { StockMovementHistoryScreen } from "./src/screens/StockMovementHistoryScreen";
 import { SupplierFormScreen } from "./src/screens/SupplierFormScreen";
 import { SuppliersListScreen } from "./src/screens/SuppliersListScreen";
 
@@ -55,6 +58,17 @@ function RootNavigator() {
       <AppStack.Screen name="SupplierForm" component={SupplierFormScreen} options={{ title: "Fournisseur" }} />
       <AppStack.Screen name="ProductsList" component={ProductsListScreen} options={{ title: "Produits" }} />
       <AppStack.Screen name="ProductForm" component={ProductFormScreen} options={{ title: "Produit" }} />
+      <AppStack.Screen name="StockLevels" component={StockLevelsScreen} options={{ title: "Stock" }} />
+      <AppStack.Screen
+        name="StockMovementForm"
+        component={StockMovementFormScreen}
+        options={{ title: "Mouvement de stock" }}
+      />
+      <AppStack.Screen
+        name="StockMovementHistory"
+        component={StockMovementHistoryScreen}
+        options={{ title: "Historique" }}
+      />
     </AppStack.Navigator>
   );
 }

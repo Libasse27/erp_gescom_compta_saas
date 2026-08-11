@@ -37,6 +37,13 @@ describe("isAllowedToPersist", () => {
     expect(isAllowedToPersist(["products", "p1"])).toBe(true);
   });
 
+  it("autorise les clés stock (niveaux et historique de mouvements)", () => {
+    expect(isAllowedToPersist(["stock"])).toBe(true);
+    expect(isAllowedToPersist(["stock", { page: 1, pageSize: 20 }])).toBe(true);
+    expect(isAllowedToPersist(["stock-movements"])).toBe(true);
+    expect(isAllowedToPersist(["stock-movements", { productId: "p1", page: 1, pageSize: 20 }])).toBe(true);
+  });
+
   it("autorise le contexte utilisateur (permissions)", () => {
     expect(isAllowedToPersist(["users", "me", "context"])).toBe(true);
   });
