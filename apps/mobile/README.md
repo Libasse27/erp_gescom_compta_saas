@@ -1,8 +1,21 @@
 # apps/mobile
 
-Squelette non initialisé.
+Application mobile de l'ERP — Expo (React Native) + TypeScript.
+Décision et alternatives écartées : `docs/adr/0012-stack-mobile.md`.
 
-Le choix du framework (React Native / Expo) n'a pas encore été tranché — il
-sera décidé et documenté dans un ADR au moment de la **Phase 9** de
-`docs/PROMPT-MAITRE-SAAS.md`, en même temps que la stratégie offline-first
-(réseau 3G/4G intermittent) et la purge du cache local au changement de tenant.
+## État
+
+Scaffold Phase 9.0 : navigation minimale (`App.tsx`), aucune fonctionnalité
+métier. L'authentification (login/MFA/refresh via `expo-secure-store`),
+l'offline-first (file de mutations, purge du cache au changement de tenant) et
+les écrans ERP arrivent en Phase 9.2+ (`docs/PROMPT-MAITRE-SAAS.md`).
+
+## Commandes
+
+```bash
+pnpm --filter @erp/mobile dev      # expo start
+pnpm --filter @erp/mobile typecheck
+pnpm --filter @erp/mobile lint
+```
+
+L'API consommée est préfixée `/v1` (`docs/adr/0007-versionnage-api-sans-objet.md`).
