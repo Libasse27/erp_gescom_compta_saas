@@ -1,5 +1,6 @@
 // Types et DTO partagés entre apps/api, apps/web, apps/mobile, apps/desktop.
 // Contenu ajouté à partir de la Phase 1 (modèle de domaine SaaS).
+export * from "./auth";
 
 // Module ERP — Clients (Phase 8). En miroir de l'enum Prisma CustomerType
 // (apps/api/prisma/schema.prisma) : ce package ne dépend pas de @prisma/client,
