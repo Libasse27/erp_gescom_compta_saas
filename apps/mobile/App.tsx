@@ -12,6 +12,8 @@ import { ClientsListScreen } from "./src/screens/ClientsListScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { MfaVerifyScreen } from "./src/screens/MfaVerifyScreen";
+import { SupplierFormScreen } from "./src/screens/SupplierFormScreen";
+import { SuppliersListScreen } from "./src/screens/SuppliersListScreen";
 
 // Flux d'authentification réel (Phase 9.2, docs/adr/0012-stack-mobile.md) :
 // remplace le squelette de navigation de la Phase 9.0. La navigation
@@ -47,6 +49,8 @@ function RootNavigator() {
       <AppStack.Screen name="Home" component={HomeScreen} options={{ title: "Accueil" }} />
       <AppStack.Screen name="ClientsList" component={ClientsListScreen} options={{ title: "Clients" }} />
       <AppStack.Screen name="ClientForm" component={ClientFormScreen} options={{ title: "Client" }} />
+      <AppStack.Screen name="SuppliersList" component={SuppliersListScreen} options={{ title: "Fournisseurs" }} />
+      <AppStack.Screen name="SupplierForm" component={SupplierFormScreen} options={{ title: "Fournisseur" }} />
     </AppStack.Navigator>
   );
 }

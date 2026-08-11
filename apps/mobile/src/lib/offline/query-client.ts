@@ -12,9 +12,10 @@ import { sqlitePersister } from "./persister";
 // module préfixé différemment sous "users".
 const DEHYDRATE_ALLOW_LIST: readonly (readonly unknown[])[] = [
   ["customers"], // liste + fiche client (Phase 9.4)
+  ["suppliers"], // liste + fiche fournisseur (Phase 9.5)
   ["users", "me", "context"], // permissions — sans ça, un cold start
-  // hors-ligne masquerait l'entrée "Clients" alors que la liste de clients,
-  // elle, resterait consultable depuis le cache.
+  // hors-ligne masquerait les entrées "Clients"/"Fournisseurs" alors que
+  // leurs listes, elles, resteraient consultables depuis le cache.
 ];
 
 // Exporté pour test (revue sécurité Phase 9.4) : c'est le seul contrôle qui

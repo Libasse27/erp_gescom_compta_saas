@@ -16,6 +16,7 @@ export function HomeScreen({ navigation }: Props) {
   // bouton) — même discipline que le web, le backend reste la seule
   // autorité réelle (docs/adr/0015-...).
   const canReadClients = useHasPermission("clients.read");
+  const canReadSuppliers = useHasPermission("suppliers.read");
 
   return (
     <View style={styles.container}>
@@ -24,6 +25,11 @@ export function HomeScreen({ navigation }: Props) {
       {canReadClients ? (
         <Pressable style={styles.button} onPress={() => navigation.navigate("ClientsList")}>
           <Text style={styles.buttonText}>Clients</Text>
+        </Pressable>
+      ) : null}
+      {canReadSuppliers ? (
+        <Pressable style={styles.button} onPress={() => navigation.navigate("SuppliersList")}>
+          <Text style={styles.buttonText}>Fournisseurs</Text>
         </Pressable>
       ) : null}
       <Pressable style={styles.button} onPress={() => void logout()}>
