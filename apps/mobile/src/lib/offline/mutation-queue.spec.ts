@@ -54,8 +54,8 @@ function makeMutation(overrides: Partial<QueuedMutation> = {}): QueuedMutation {
   };
 }
 
-function response(status: number): Response {
-  return { ok: status >= 200 && status < 300, status } as Response;
+function response(status: number, body?: unknown): Response {
+  return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
 }
 
 beforeEach(() => {
@@ -177,6 +177,15 @@ describe("processQueue", () => {
     expect(mockIncrementRetry).not.toHaveBeenCalled();
   });
 
+  it("conserve le message d'erreur du corps de la réponse sur un rejet 4xx métier (ex: conflit 409 produit)", async () => {
+    mockListPendingMutations.mockResolvedValueOnce([makeMutation({ id: 1, path: "/products" })]);
+    mockApiFetch.mockResolvedValueOnce(response(409, { message: "Ce code produit est déjà utilisé" }));
+
+    await processQueue({ getAccessToken: () => "token" });
+
+    expect(mockMarkMutationFailed).toHaveBeenCalledWith(1, "Ce code produit est déjà utilisé");
+  });
+
   it("incrémente retryCount et programme un nouvel essai sous le maximum de tentatives transitoires", async () => {
     mockListPendingMutations.mockResolvedValueOnce([makeMutation({ id: 1, retryCount: 0 })]);
     mockApiFetch.mockResolvedValueOnce(response(500));
@@ -195,6 +204,17 @@ describe("processQueue", () => {
 
     expect(mockMarkMutationFailed).toHaveBeenCalledWith(1, expect.stringContaining("503"));
     expect(mockIncrementRetry).not.toHaveBeenCalled();
+  });
+
+  it("n'expose jamais le corps d'une réponse 5xx, même s'il contient un message (revue sécurité Phase 9.2/9.6)", async () => {
+    mockListPendingMutations.mockResolvedValueOnce([makeMutation({ id: 1, retryCount: 4 })]);
+    mockApiFetch.mockResolvedValueOnce(response(503, { message: "stack trace interne non maîtrisée" }));
+
+    await processQueue({ getAccessToken: () => "token" });
+
+    const [, message] = mockMarkMutationFailed.mock.calls[0]!;
+    expect(message).not.toContain("stack trace");
+    expect(message).toContain("503");
   });
 
   it("programme le nouvel essai après un backoff, sans bloquer indéfiniment", async () => {

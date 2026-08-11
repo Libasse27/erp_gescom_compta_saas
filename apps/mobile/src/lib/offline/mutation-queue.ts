@@ -1,3 +1,4 @@
+import { extractErrorMessage } from "@erp/utils";
 import { apiFetch } from "../api";
 import {
   incrementRetry,
@@ -155,8 +156,15 @@ async function processOne(mutation: QueuedMutation, deps: ProcessQueueDeps): Pro
 
   // 4xx métier (400/403/404/409/422) : rejouer une erreur de validation à
   // l'infini est du bruit, pas une panne transitoire — échec terminal
-  // immédiat, on continue avec le reste de la file.
-  await markMutationFailed(mutation.id, `HTTP ${response.status}`);
+  // immédiat, on continue avec le reste de la file. Le corps est lu ici
+  // (contrairement à la branche 5xx/429 ci-dessus) : l'API garantit une
+  // forme de message maîtrisée sur un rejet métier (ZodValidationPipe /
+  // HttpException), ce qui n'est pas le cas d'une erreur serveur sans
+  // filtre d'exception global garanti — même prudence que safeErrorMessage
+  // dans auth-context.tsx (revue sécurité Phase 9.2), reconduite ici pour
+  // Produits (revue sécurité Phase 9.6 : conflit 409 sur code dupliqué).
+  const body = await response.json().catch(() => null);
+  await markMutationFailed(mutation.id, extractErrorMessage(body, `HTTP ${response.status}`));
   return "continue";
 }
 
