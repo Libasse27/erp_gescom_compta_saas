@@ -12,24 +12,34 @@
     "build": "expo export --platform ios --platform android",
     "lint": "eslint App.tsx src",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "echo \"no tests yet\" && exit 0",
+    "test": "jest",
     "test:tenant": "echo \"no tests yet\" && exit 0"
   },
   "dependencies": {
     "@erp/permissions": "workspace:*",
     "@erp/types": "workspace:*",
+    "@erp/utils": "workspace:*",
     "@erp/validation": "workspace:*",
+    "@hookform/resolvers": "^5.7.1",
     "@react-navigation/native": "^7.3.16",
     "@react-navigation/native-stack": "^7.18.8",
     "expo": "~57.0.12",
+    "expo-secure-store": "~15.0.7",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
+    "react-hook-form": "^7.85.0",
     "react-native": "0.86.2",
     "react-native-safe-area-context": "^5.8.1",
-    "react-native-screens": "^4.27.0"
+    "react-native-screens": "^4.27.0",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@testing-library/react-native": "^14.0.1",
+    "@types/jest": "^29.5.13",
     "@types/react": "~19.2.2",
+    "babel-preset-expo": "~57.0.6",
+    "jest-expo": "~57.0.4",
+    "react-test-renderer": "19.2.3",
     "typescript": "~6.0.3"
   }
 }
