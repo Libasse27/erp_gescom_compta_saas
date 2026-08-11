@@ -1,6 +1,7 @@
 import { extractErrorMessage } from "./api";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
+// docs/adr/0007-... : toutes les routes NestJS sont préfixées /v1.
+const API_URL = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000"}/v1`;
 
 export class ApiClientError extends Error {}
 
