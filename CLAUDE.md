@@ -29,8 +29,8 @@ monorepo:       pnpm workspaces + Turborepo — gestionnaire: pnpm 9.12
 api:            NestJS 10 (Express platform)
 base_donnees:   PostgreSQL 16 + Prisma
 web:            Next.js 15 (App Router)
-mobile:         à trancher en Phase 9 (ADR à venir)
-desktop:        à trancher en Phase 9 (ADR à venir)
+mobile:         Expo (React Native) + TypeScript — tranché Phase 9 (docs/adr/0012-stack-mobile.md)
+desktop:        Electron encapsulant apps/web — tranché Phase 9 (docs/adr/0013-stack-desktop.md)
 etat_serveur:   à trancher en Phase 7 (TanStack Query pressenti)
 ui:             à trancher en Phase 7 (Tailwind + shadcn/ui pressenti)
 tests:          Jest + Supertest (API) — Playwright (E2E) à mettre en place Phase 9/10

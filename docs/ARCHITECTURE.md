@@ -13,8 +13,8 @@ ERP_GESCOM_COMPTA_SAAS/
 ├── apps/
 │   ├── api/            NestJS — API REST, source de vérité des règles métier
 │   ├── web/             Next.js 15 (App Router) — Super Admin + espace entreprise
-│   ├── mobile/          non initialisé — ADR à venir en Phase 9
-│   └── desktop/         non initialisé — ADR à venir en Phase 9
+│   ├── mobile/          Expo (React Native) + TypeScript — scaffold Phase 9.0 (ADR 0012)
+│   └── desktop/         Electron encapsulant apps/web — scaffold Phase 9.0 (ADR 0013)
 │
 ├── packages/
 │   ├── types/            Types et DTO partagés (TypeScript pur)
@@ -46,7 +46,8 @@ ERP_GESCOM_COMPTA_SAAS/
 | API | NestJS 10 | Couches controller/service/repository natives, DI, guards pour RBAC et tenant context |
 | Base de données | PostgreSQL 16 + Prisma | Row Level Security native pour l'isolation tenant structurelle, transactions ACID pour le provisioning |
 | Web | Next.js 15 (App Router) | Distinction propre Super Admin / Entreprise / onboarding, SEO pour les pages publiques |
-| Mobile / Desktop | À trancher (Phase 9) | Dépend des contraintes offline-first 3G/4G, non encore arbitrées |
+| Mobile | Expo (React Native) + TypeScript | Managed workflow, OTA updates, offline-first (3G/4G) sans dette de tooling natif — ADR 0012 |
+| Desktop | Electron encapsulant `apps/web` | Réutilise 100 % du code web (BFF, écrans ERP) au lieu de dupliquer une UI native — ADR 0013 |
 
 ## 3. Flux de données (cible, mis en place progressivement)
 
@@ -75,9 +76,10 @@ associés (accès direct au `PrismaClient`, `tenantId` reçu du client, etc.).
 ## 4. Dépendances entre packages
 
 ```text
-apps/api   → packages/types, validation, permissions, auth, utils, config
-apps/web   → packages/types, validation, permissions, ui, utils, config
-apps/mobile/desktop (futur) → packages/types, validation, permissions, utils
+apps/api     → packages/types, validation, permissions, auth, utils, config
+apps/web     → packages/types, validation, permissions, ui, utils, config
+apps/mobile  → packages/types, validation, permissions (ui : primitives locales, packages/ui est DOM/shadcn — ADR 0012)
+apps/desktop → aucun (encapsule apps/web, qui porte déjà toutes ces dépendances — ADR 0013)
 ```
 
 Aucune app ne doit dupliquer un type, un schéma de validation ou une
@@ -110,3 +112,10 @@ définition de permission déjà présent dans `packages/`.
   `test:tenant` (5 tests) prouvant l'isolation au niveau base, pas seulement
   applicatif. Pas encore de table métier ERP à laquelle appliquer la RLS
   au-delà des tables plateforme déjà tenant-scoped (Phase 8).
+- **Phase 8** : les 9 modules ERP (Clients → Rapports) migrés sur le socle
+  multi-tenant, RBAC et entitlements.
+- **Phase 9.0** : toutes les routes NestJS sont préfixées `/v1`
+  (`docs/adr/0007-...`, rouvert). Scaffolds `apps/mobile` (Expo, ADR 0012) et
+  `apps/desktop` (Electron encapsulant `apps/web`, ADR 0013) — navigation/
+  fenêtre minimales, aucune fonctionnalité métier. Auth mobile, offline-first
+  et écrans ERP mobile restent à construire (Phase 9.2+).
