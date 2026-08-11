@@ -1,0 +1,32 @@
+{
+  "name": "@erp/desktop",
+  "private": true,
+  "version": "0.0.1",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "tsc -p tsconfig.json && electron dist/main.js",
+    "build": "tsc -p tsconfig.json",
+    "package": "pnpm build && electron-builder",
+    "lint": "eslint electron",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "echo \"no tests yet\" && exit 0",
+    "test:tenant": "echo \"no tests yet\" && exit 0"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.10",
+    "electron": "^43.3.0",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.6.3"
+  },
+  "build": {
+    "appId": "sn.erp-gescom-compta.desktop",
+    "productName": "ERP Gescom Compta",
+    "files": ["dist/**/*"],
+    "directories": {
+      "output": "release"
+    }
+  }
+}
