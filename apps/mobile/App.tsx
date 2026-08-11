@@ -12,6 +12,8 @@ import { ClientsListScreen } from "./src/screens/ClientsListScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { MfaVerifyScreen } from "./src/screens/MfaVerifyScreen";
+import { ProductFormScreen } from "./src/screens/ProductFormScreen";
+import { ProductsListScreen } from "./src/screens/ProductsListScreen";
 import { SupplierFormScreen } from "./src/screens/SupplierFormScreen";
 import { SuppliersListScreen } from "./src/screens/SuppliersListScreen";
 
@@ -51,6 +53,8 @@ function RootNavigator() {
       <AppStack.Screen name="ClientForm" component={ClientFormScreen} options={{ title: "Client" }} />
       <AppStack.Screen name="SuppliersList" component={SuppliersListScreen} options={{ title: "Fournisseurs" }} />
       <AppStack.Screen name="SupplierForm" component={SupplierFormScreen} options={{ title: "Fournisseur" }} />
+      <AppStack.Screen name="ProductsList" component={ProductsListScreen} options={{ title: "Produits" }} />
+      <AppStack.Screen name="ProductForm" component={ProductFormScreen} options={{ title: "Produit" }} />
     </AppStack.Navigator>
   );
 }

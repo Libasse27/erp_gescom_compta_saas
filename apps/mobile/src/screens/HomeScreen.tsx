@@ -17,6 +17,7 @@ export function HomeScreen({ navigation }: Props) {
   // autorité réelle (docs/adr/0015-...).
   const canReadClients = useHasPermission("clients.read");
   const canReadSuppliers = useHasPermission("suppliers.read");
+  const canReadProducts = useHasPermission("products.read");
 
   return (
     <View style={styles.container}>
@@ -30,6 +31,11 @@ export function HomeScreen({ navigation }: Props) {
       {canReadSuppliers ? (
         <Pressable style={styles.button} onPress={() => navigation.navigate("SuppliersList")}>
           <Text style={styles.buttonText}>Fournisseurs</Text>
+        </Pressable>
+      ) : null}
+      {canReadProducts ? (
+        <Pressable style={styles.button} onPress={() => navigation.navigate("ProductsList")}>
+          <Text style={styles.buttonText}>Produits</Text>
         </Pressable>
       ) : null}
       <Pressable style={styles.button} onPress={() => void logout()}>

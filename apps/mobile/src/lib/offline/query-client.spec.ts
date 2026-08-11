@@ -31,6 +31,12 @@ describe("isAllowedToPersist", () => {
     expect(isAllowedToPersist(["suppliers", "s1"])).toBe(true);
   });
 
+  it("autorise les clés products (liste et fiche)", () => {
+    expect(isAllowedToPersist(["products"])).toBe(true);
+    expect(isAllowedToPersist(["products", { page: 1, pageSize: 20 }])).toBe(true);
+    expect(isAllowedToPersist(["products", "p1"])).toBe(true);
+  });
+
   it("autorise le contexte utilisateur (permissions)", () => {
     expect(isAllowedToPersist(["users", "me", "context"])).toBe(true);
   });
