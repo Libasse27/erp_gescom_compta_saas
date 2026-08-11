@@ -1,16 +1,31 @@
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useAuth } from "../lib/auth-context";
+import { useHasPermission } from "../lib/permissions";
+import type { AppStackParamList } from "../navigation/types";
+
+type Props = NativeStackScreenProps<AppStackParamList, "Home">;
 
 // Écran d'accueil affiché une fois authentifié — remplace le
-// PlaceholderScreen du scaffold Phase 9.0. Les écrans ERP réels (clients,
-// ventes, ...) arrivent en Phase 9.4.
-export function HomeScreen() {
+// PlaceholderScreen du scaffold Phase 9.0. Le module Clients (Phase 9.4) est
+// le premier écran ERP réel ; les autres modules suivront dans des cycles
+// ultérieurs, probablement derrière une barre d'onglets à ce moment-là.
+export function HomeScreen({ navigation }: Props) {
   const { user, logout } = useAuth();
+  // Gating au niveau de l'entrée de navigation uniquement (masquer le
+  // bouton) — même discipline que le web, le backend reste la seule
+  // autorité réelle (docs/adr/0015-...).
+  const canReadClients = useHasPermission("clients.read");
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Bienvenue{user ? `, ${user.firstName}` : ""}</Text>
       <Text>Application mobile — en construction (Phase 9).</Text>
+      {canReadClients ? (
+        <Pressable style={styles.button} onPress={() => navigation.navigate("ClientsList")}>
+          <Text style={styles.buttonText}>Clients</Text>
+        </Pressable>
+      ) : null}
       <Pressable style={styles.button} onPress={() => void logout()}>
         <Text style={styles.buttonText}>Se déconnecter</Text>
       </Pressable>

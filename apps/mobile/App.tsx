@@ -7,6 +7,8 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthProvider, useAuth } from "./src/lib/auth-context";
 import { queryClient, useSyncEngine } from "./src/lib/offline";
 import type { AppStackParamList, AuthStackParamList } from "./src/navigation/types";
+import { ClientFormScreen } from "./src/screens/ClientFormScreen";
+import { ClientsListScreen } from "./src/screens/ClientsListScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { MfaVerifyScreen } from "./src/screens/MfaVerifyScreen";
@@ -43,6 +45,8 @@ function RootNavigator() {
   return (
     <AppStack.Navigator>
       <AppStack.Screen name="Home" component={HomeScreen} options={{ title: "Accueil" }} />
+      <AppStack.Screen name="ClientsList" component={ClientsListScreen} options={{ title: "Clients" }} />
+      <AppStack.Screen name="ClientForm" component={ClientFormScreen} options={{ title: "Client" }} />
     </AppStack.Navigator>
   );
 }
