@@ -3,6 +3,11 @@ dist/
 build/
 .next/
 .turbo/
+.expo/
+expo-env.d.ts
+apps/mobile/ios/
+apps/mobile/android/
+apps/desktop/release/
 *.tsbuildinfo
 .env
 .env.local
