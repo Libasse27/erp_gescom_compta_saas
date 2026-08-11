@@ -14,6 +14,9 @@ import { LoginScreen } from "./src/screens/LoginScreen";
 import { MfaVerifyScreen } from "./src/screens/MfaVerifyScreen";
 import { ProductFormScreen } from "./src/screens/ProductFormScreen";
 import { ProductsListScreen } from "./src/screens/ProductsListScreen";
+import { SaleDetailScreen } from "./src/screens/SaleDetailScreen";
+import { SaleFormScreen } from "./src/screens/SaleFormScreen";
+import { SalesListScreen } from "./src/screens/SalesListScreen";
 import { StockLevelsScreen } from "./src/screens/StockLevelsScreen";
 import { StockMovementFormScreen } from "./src/screens/StockMovementFormScreen";
 import { StockMovementHistoryScreen } from "./src/screens/StockMovementHistoryScreen";
@@ -69,6 +72,9 @@ function RootNavigator() {
         component={StockMovementHistoryScreen}
         options={{ title: "Historique" }}
       />
+      <AppStack.Screen name="SalesList" component={SalesListScreen} options={{ title: "Ventes" }} />
+      <AppStack.Screen name="SaleForm" component={SaleFormScreen} options={{ title: "Nouvelle vente" }} />
+      <AppStack.Screen name="SaleDetail" component={SaleDetailScreen} options={{ title: "Vente" }} />
     </AppStack.Navigator>
   );
 }

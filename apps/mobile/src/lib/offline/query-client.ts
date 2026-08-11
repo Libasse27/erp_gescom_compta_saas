@@ -16,6 +16,9 @@ const DEHYDRATE_ALLOW_LIST: readonly (readonly unknown[])[] = [
   ["products"], // liste + fiche produit (Phase 9.6)
   ["stock"], // niveaux de stock calculés (Phase 9.7)
   ["stock-movements"], // historique de mouvements par produit (Phase 9.7)
+  ["sales"], // liste des ventes (Phase 9.8)
+  ["sale"], // détail d'une vente avec ses lignes (Phase 9.8) — préfixe exact,
+  // ne recoupe pas ["sales"] (égalité de segment stricte, "sale" !== "sales")
   ["users", "me", "context"], // permissions — sans ça, un cold start
   // hors-ligne masquerait les entrées "Clients"/"Fournisseurs" alors que
   // leurs listes, elles, resteraient consultables depuis le cache.

@@ -11,6 +11,9 @@ export type AuthStackParamList = {
 // patron : StockMovement est un grand livre append-only, pas de mode édition
 // (StockMovementForm ne fait que pré-remplir le produit), et un écran
 // d'historique dédié par produit sans équivalent dans les modules précédents.
+// Ventes (Phase 9.8) : première entité à lignes — SaleForm est
+// création-uniquement (aucune route de modification des lignes côté API),
+// SaleDetail est lecture seule + actions de cycle de vie (confirmer/annuler).
 export type AppStackParamList = {
   Home: undefined;
   ClientsList: undefined;
@@ -22,4 +25,7 @@ export type AppStackParamList = {
   StockLevels: undefined;
   StockMovementForm: { productId?: string } | undefined;
   StockMovementHistory: { productId: string; productCode: string; productName: string };
+  SalesList: undefined;
+  SaleForm: undefined;
+  SaleDetail: { saleId: string };
 };

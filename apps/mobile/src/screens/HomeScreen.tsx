@@ -19,6 +19,7 @@ export function HomeScreen({ navigation }: Props) {
   const canReadSuppliers = useHasPermission("suppliers.read");
   const canReadProducts = useHasPermission("products.read");
   const canReadStock = useHasPermission("stock.read");
+  const canReadSales = useHasPermission("sales.read");
 
   return (
     <View style={styles.container}>
@@ -42,6 +43,11 @@ export function HomeScreen({ navigation }: Props) {
       {canReadStock ? (
         <Pressable style={styles.button} onPress={() => navigation.navigate("StockLevels")}>
           <Text style={styles.buttonText}>Stock</Text>
+        </Pressable>
+      ) : null}
+      {canReadSales ? (
+        <Pressable style={styles.button} onPress={() => navigation.navigate("SalesList")}>
+          <Text style={styles.buttonText}>Ventes</Text>
         </Pressable>
       ) : null}
       <Pressable style={styles.button} onPress={() => void logout()}>

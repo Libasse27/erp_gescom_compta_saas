@@ -44,6 +44,15 @@ describe("isAllowedToPersist", () => {
     expect(isAllowedToPersist(["stock-movements", { productId: "p1", page: 1, pageSize: 20 }])).toBe(true);
   });
 
+  it("autorise les clés sales (liste et fiche), sans collision entre elles", () => {
+    expect(isAllowedToPersist(["sales"])).toBe(true);
+    expect(isAllowedToPersist(["sales", { page: 1, pageSize: 20 }])).toBe(true);
+    expect(isAllowedToPersist(["sale", "s1"])).toBe(true);
+    // "sale" et "sales" sont des préfixes distincts (égalité de segment
+    // stricte) : la clé fiche ne doit jamais matcher le préfixe liste.
+    expect(isAllowedToPersist(["sale"])).toBe(true);
+  });
+
   it("autorise le contexte utilisateur (permissions)", () => {
     expect(isAllowedToPersist(["users", "me", "context"])).toBe(true);
   });
