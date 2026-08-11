@@ -2,16 +2,24 @@ import { act, renderHook, waitFor } from "@testing-library/react-native";
 import type { CurrentUser } from "@erp/types";
 import { apiFetch, fetchCurrentUser } from "./api";
 import { AuthApiError, AuthProvider, useAuth } from "./auth-context";
+import { purgeOfflineStore } from "./offline";
 import { clearStoredRefreshToken, getStoredRefreshToken, setStoredRefreshToken } from "./secure-token-store";
 
 jest.mock("./api");
 jest.mock("./secure-token-store");
+// Factory explicite : un jest.mock("./offline") sans factory introspecte le
+// module réel (barrel qui importe db.ts) pour générer l'automock, ce qui
+// déclenche le véritable appel expo-sqlite openDatabaseSync() au chargement.
+jest.mock("./offline", () => ({
+  purgeOfflineStore: jest.fn(),
+}));
 
 const mockApiFetch = apiFetch as jest.MockedFunction<typeof apiFetch>;
 const mockFetchCurrentUser = fetchCurrentUser as jest.MockedFunction<typeof fetchCurrentUser>;
 const mockGetStoredRefreshToken = getStoredRefreshToken as jest.MockedFunction<typeof getStoredRefreshToken>;
 const mockSetStoredRefreshToken = setStoredRefreshToken as jest.MockedFunction<typeof setStoredRefreshToken>;
 const mockClearStoredRefreshToken = clearStoredRefreshToken as jest.MockedFunction<typeof clearStoredRefreshToken>;
+const mockPurgeOfflineStore = purgeOfflineStore as jest.MockedFunction<typeof purgeOfflineStore>;
 
 const CURRENT_USER: CurrentUser = {
   id: "user-1",
@@ -36,6 +44,16 @@ beforeEach(() => {
 });
 
 describe("AuthProvider", () => {
+  it("purge le cache hors-ligne au démarrage quand aucun jeton n'est stocké", async () => {
+    // Seule branche du flux de démarrage qui menait à LoginScreen sans
+    // purger avant la correction de la revue sécurité Phase 9.3 — un cold
+    // start sans jeton stocké doit purger inconditionnellement.
+    const { result } = await renderHook(() => useAuth(), { wrapper: AuthProvider });
+    await waitFor(() => expect(result.current.status).toBe("unauthenticated"));
+
+    expect(mockPurgeOfflineStore).toHaveBeenCalled();
+  });
+
   it("connecte l'utilisateur au login nominal (sans MFA)", async () => {
     const { result } = await renderHook(() => useAuth(), { wrapper: AuthProvider });
     await waitFor(() => expect(result.current.status).toBe("unauthenticated"));
@@ -99,6 +117,9 @@ describe("AuthProvider", () => {
     expect(mockApiFetch).toHaveBeenCalledWith("/auth/refresh", expect.objectContaining({ method: "POST" }));
     expect(mockSetStoredRefreshToken).toHaveBeenCalledWith("rotated-refresh");
     expect(result.current.accessToken).toBe("access-2");
+    // Même tenant, même session : purger ici casserait l'intérêt du cache
+    // hors-ligne persistant (docs/adr/0014-...).
+    expect(mockPurgeOfflineStore).not.toHaveBeenCalled();
   });
 
   it("persiste la rotation du refresh token même si le composant est démonté avant la fin du refresh", async () => {
@@ -139,6 +160,7 @@ describe("AuthProvider", () => {
 
     await waitFor(() => expect(result.current.status).toBe("unauthenticated"));
     expect(mockClearStoredRefreshToken).toHaveBeenCalled();
+    expect(mockPurgeOfflineStore).toHaveBeenCalled();
     expect(result.current.user).toBeNull();
   });
 
@@ -167,6 +189,7 @@ describe("AuthProvider", () => {
       expect.objectContaining({ method: "POST", headers: { Authorization: "Bearer access-1" } }),
     );
     expect(mockClearStoredRefreshToken).toHaveBeenCalled();
+    expect(mockPurgeOfflineStore).toHaveBeenCalled();
     expect(result.current.status).toBe("unauthenticated");
     expect(result.current.user).toBeNull();
   });

@@ -1,9 +1,11 @@
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StatusBar } from "expo-status-bar";
 import { ActivityIndicator, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthProvider, useAuth } from "./src/lib/auth-context";
+import { queryClient, useSyncEngine } from "./src/lib/offline";
 import type { AppStackParamList, AuthStackParamList } from "./src/navigation/types";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { LoginScreen } from "./src/screens/LoginScreen";
@@ -17,6 +19,9 @@ const AppStack = createNativeStackNavigator<AppStackParamList>();
 
 function RootNavigator() {
   const { status } = useAuth();
+  // Rejeu de la file de mutations hors-ligne dès qu'une session authentifiée
+  // et une connexion réseau sont disponibles (Phase 9.3, docs/adr/0014-...).
+  useSyncEngine();
 
   if (status === "loading") {
     return (
@@ -45,11 +50,13 @@ function RootNavigator() {
 export default function App() {
   return (
     <SafeAreaProvider>
-      <AuthProvider>
-        <NavigationContainer>
-          <RootNavigator />
-        </NavigationContainer>
-      </AuthProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <NavigationContainer>
+            <RootNavigator />
+          </NavigationContainer>
+        </AuthProvider>
+      </QueryClientProvider>
       <StatusBar style="auto" />
     </SafeAreaProvider>
   );

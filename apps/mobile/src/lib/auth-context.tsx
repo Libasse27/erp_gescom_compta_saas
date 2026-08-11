@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import type { CurrentUser } from "@erp/types";
 import { extractErrorMessage } from "@erp/utils";
 import { apiFetch, fetchCurrentUser } from "./api";
+import { purgeOfflineStore } from "./offline";
 import { clearStoredRefreshToken, getStoredRefreshToken, setStoredRefreshToken } from "./secure-token-store";
 
 export class AuthApiError extends Error {}
@@ -69,6 +70,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async function restoreSession() {
       const storedRefreshToken = await getStoredRefreshToken();
       if (!storedRefreshToken) {
+        // Purge même ici (aucune session à clore) : c'est la seule branche du
+        // flux de démarrage qui menait à LoginScreen sans purger — revue
+        // sécurité Phase 9.3 (docs/adr/0014-...). Un cold start sans jeton
+        // stocké redevient le filet qui garantit la purge quel que soit
+        // l'ordre des opérations dans les branches ci-dessous : si l'app est
+        // tuée après avoir effacé le refresh token mais avant d'avoir purgé,
+        // ce chemin rattrape la purge au lancement suivant.
+        await purgeOfflineStore();
         if (!cancelled) setSession(UNAUTHENTICATED_SESSION);
         return;
       }
@@ -76,6 +85,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { res, data } = await postAuth("/auth/refresh", { refreshToken: storedRefreshToken });
 
       if (!res.ok) {
+        // Purge avant d'effacer le jeton : réduit la fenêtre où un kill de
+        // l'app laisserait la file de mutations peuplée sans qu'aucune
+        // branche ne la rattrape avant le prochain login (voir aussi la
+        // branche ci-dessus, qui rattrape de toute façon ce cas au démarrage
+        // suivant si l'ordre inverse se produit malgré tout).
+        await purgeOfflineStore();
         await clearStoredRefreshToken();
         if (!cancelled) setSession(UNAUTHENTICATED_SESSION);
         return;
@@ -93,6 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     restoreSession().catch(async () => {
       try {
+        await purgeOfflineStore();
         await clearStoredRefreshToken();
       } finally {
         if (!cancelled) setSession(UNAUTHENTICATED_SESSION);
@@ -133,10 +149,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Best-effort : la révocation côté serveur peut échouer (réseau
       // instable, access token déjà expiré) sans empêcher la déconnexion
       // locale — un appareil doit toujours pouvoir "se déconnecter", même
-      // hors-ligne. Une file de révocation à rejouer (retry) appartient à la
-      // stratégie offline-first de la Phase 9.3, pas à ce cycle.
+      // hors-ligne. Un rejeu de cette révocation via la file de mutations
+      // hors-ligne (scope 'auth') est réservé mais délibérément non câblé
+      // dans ce cycle (docs/adr/0014-...) : le cas est mineur et n'a rien de
+      // vérifiable sans écran ERP réel pour l'exercer.
       await postAuth("/auth/logout", { refreshToken }, session.accessToken ?? undefined).catch(() => undefined);
     }
+    await purgeOfflineStore();
     await clearStoredRefreshToken();
     setSession(UNAUTHENTICATED_SESSION);
   };
