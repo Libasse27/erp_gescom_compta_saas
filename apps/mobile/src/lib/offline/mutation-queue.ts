@@ -55,6 +55,26 @@ export async function listMutations(): Promise<QueuedMutation[]> {
   return listAllMutations();
 }
 
+// Un rejet serveur définitif (4xx métier, ou 5xx/429 après épuisement des
+// tentatives) ne doit jamais être présenté comme un succès à l'appelant —
+// revue sécurité Phase 9.4 : sans ce contrôle, processQueue() résout
+// silencieusement même quand la mutation vient d'être marquée 'failed', et
+// un écran qui enchaîne sur navigation.goBack() après un simple `await`
+// laisse croire à l'utilisateur qu'une action refusée (ex: permission
+// retirée entre-temps, 403) a réussi. Ligne absente de listMutations() =
+// traitée avec succès (markMutationDone la supprime) ; toujours
+// 'pending'/'processing' = pas encore confirmée (hors-ligne ou file
+// bloquée plus haut), pas une erreur en soi.
+export class MutationRejectedError extends Error {}
+
+export async function assertMutationSucceeded(mutationId: number): Promise<void> {
+  const mutations = await listAllMutations();
+  const mutation = mutations.find((candidate) => candidate.id === mutationId);
+  if (mutation?.status === "failed") {
+    throw new MutationRejectedError(mutation.lastError ?? "La modification a été refusée par le serveur");
+  }
+}
+
 let isProcessing = false;
 
 // Rejeu séquentiel, FIFO par id — jamais en parallèle : deux modifications

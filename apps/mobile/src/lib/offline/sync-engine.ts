@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useAuth } from "../auth-context";
 import { processQueue } from "./mutation-queue";
 import { useIsOnline } from "./network";
+import { queryClient } from "./query-client";
 
 // Déclenche le rejeu de la file de mutations quand une session authentifiée
 // ET une connexion réseau sont toutes les deux disponibles — au passage à
@@ -24,6 +25,13 @@ export function useSyncEngine(): void {
     if (status !== "authenticated" || !isOnline) {
       return;
     }
-    processQueue({ getAccessToken: () => accessTokenRef.current }).catch(() => undefined);
+    // Rafraîchit tout ce qui est monté une fois le rejeu terminé : une liste
+    // laissée obsolète par une mutation créée hors-ligne (ou déjà en ligne,
+    // voir use-customers.ts) ne se met sinon à jour qu'au prochain
+    // invalidateQueries explicite d'un appelant — ici, c'est le seul point
+    // qui sait qu'un rejeu déclenché par une reconnexion vient d'aboutir.
+    processQueue({ getAccessToken: () => accessTokenRef.current })
+      .then(() => queryClient.invalidateQueries())
+      .catch(() => undefined);
   }, [status, isOnline]);
 }

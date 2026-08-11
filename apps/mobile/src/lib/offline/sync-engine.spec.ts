@@ -1,13 +1,15 @@
-import { renderHook } from "@testing-library/react-native";
+import { renderHook, waitFor } from "@testing-library/react-native";
 import { useAuth } from "../auth-context";
 import { processQueue } from "./mutation-queue";
 import { useIsOnline } from "./network";
+import { queryClient } from "./query-client";
 import { useSyncEngine } from "./sync-engine";
 
-// Factories explicites pour ../auth-context et ./mutation-queue : sans
-// factory, jest.mock introspecte le module réel pour générer l'automock, ce
-// qui charge transitivement db.ts (real expo-sqlite openDatabaseSync() au
-// chargement) — auth-context.tsx importe ./offline, mutation-queue.ts
+// Factories explicites pour ../auth-context, ./mutation-queue et
+// ./query-client : sans factory, jest.mock introspecte le module réel pour
+// générer l'automock, ce qui charge transitivement db.ts (real expo-sqlite
+// openDatabaseSync() au chargement) — auth-context.tsx importe ./offline,
+// mutation-queue.ts importe ./db, query-client.ts importe ./persister qui
 // importe ./db. ./network n'a pas ce problème (aucun appel natif à son
 // chargement, seulement dans setupOnlineManager()), automock suffit.
 jest.mock("../auth-context", () => ({
@@ -16,11 +18,15 @@ jest.mock("../auth-context", () => ({
 jest.mock("./mutation-queue", () => ({
   processQueue: jest.fn(),
 }));
+jest.mock("./query-client", () => ({
+  queryClient: { invalidateQueries: jest.fn() },
+}));
 jest.mock("./network");
 
 const mockUseAuth = useAuth as jest.MockedFunction<typeof useAuth>;
 const mockUseIsOnline = useIsOnline as jest.MockedFunction<typeof useIsOnline>;
 const mockProcessQueue = processQueue as jest.MockedFunction<typeof processQueue>;
+const mockInvalidateQueries = queryClient.invalidateQueries as jest.MockedFunction<typeof queryClient.invalidateQueries>;
 
 function mockAuth(status: "loading" | "authenticated" | "unauthenticated", accessToken: string | null = null) {
   mockUseAuth.mockReturnValue({
@@ -77,6 +83,28 @@ describe("useSyncEngine", () => {
     await rerender(undefined);
 
     expect(mockProcessQueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("rafraîchit tout ce qui est monté une fois le rejeu terminé avec succès", async () => {
+    mockAuth("authenticated", "access-1");
+    mockUseIsOnline.mockReturnValue(true);
+
+    await renderHook(() => useSyncEngine());
+
+    await waitFor(() => expect(mockInvalidateQueries).toHaveBeenCalledTimes(1));
+  });
+
+  it("ne rafraîchit rien si le rejeu échoue", async () => {
+    mockAuth("authenticated", "access-1");
+    mockUseIsOnline.mockReturnValue(true);
+    mockProcessQueue.mockRejectedValueOnce(new Error("échec réseau"));
+
+    await renderHook(() => useSyncEngine());
+
+    // Laisse la microtask du .catch() se résoudre avant d'affirmer une
+    // absence d'appel.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mockInvalidateQueries).not.toHaveBeenCalled();
   });
 
   it("transmet un getAccessToken qui lit la valeur courante du jeton en mémoire", async () => {

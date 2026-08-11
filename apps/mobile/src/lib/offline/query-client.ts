@@ -1,7 +1,32 @@
-import { QueryClient } from "@tanstack/react-query";
+import { defaultShouldDehydrateQuery, QueryClient, type Query } from "@tanstack/react-query";
 import { persistQueryClient } from "@tanstack/react-query-persist-client";
 import { setupOnlineManager } from "./network";
 import { sqlitePersister } from "./persister";
+
+// Liste blanche de ce qui va sur disque (ADR-0014 §"liste blanche de ce qui
+// est persisté" : plus sûr de la poser maintenant, tant qu'elle est courte,
+// qu'après coup une fois plusieurs modules écrits dans le cache). Sans ça,
+// toute query réussie serait persistée, y compris une future query qui
+// contiendrait par accident un jeton. Préfixe exact (pas une comparaison du
+// seul premier segment) : ["users"] seul inclurait par erreur un futur
+// module préfixé différemment sous "users".
+const DEHYDRATE_ALLOW_LIST: readonly (readonly unknown[])[] = [
+  ["customers"], // liste + fiche client (Phase 9.4)
+  ["users", "me", "context"], // permissions — sans ça, un cold start
+  // hors-ligne masquerait l'entrée "Clients" alors que la liste de clients,
+  // elle, resterait consultable depuis le cache.
+];
+
+// Exporté pour test (revue sécurité Phase 9.4) : c'est le seul contrôle qui
+// décide de ce qui atterrit en clair sur erp-offline.db, une régression ici
+// (ex: préfixe élargi par erreur) ne doit pas être invisible en CI.
+export function isAllowedToPersist(queryKey: readonly unknown[]): boolean {
+  return DEHYDRATE_ALLOW_LIST.some((prefix) => prefix.every((segment, index) => queryKey[index] === segment));
+}
+
+function shouldDehydrateQuery(query: Query): boolean {
+  return defaultShouldDehydrateQuery(query) && isAllowedToPersist(query.queryKey);
+}
 
 // À incrémenter à chaque changement de forme incompatible des données mises
 // en cache (nouveau champ requis, structure de réponse modifiée) : purge
@@ -44,6 +69,7 @@ function startPersisting(): void {
     // chargement plutôt que des données financières potentiellement obsolètes.
     maxAge: ONE_DAY_MS,
     buster: CACHE_SCHEMA_VERSION,
+    dehydrateOptions: { shouldDehydrateQuery },
   });
   stopPersisting = stop;
 }

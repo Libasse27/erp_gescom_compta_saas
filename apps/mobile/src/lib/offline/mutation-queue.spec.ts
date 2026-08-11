@@ -2,13 +2,14 @@ import { apiFetch } from "../api";
 import {
   incrementRetry,
   insertMutation,
+  listMutations as listAllMutations,
   listPendingMutations,
   markMutationDone,
   markMutationFailed,
   markMutationPending,
   markMutationProcessing,
 } from "./db";
-import { enqueueMutation, processQueue } from "./mutation-queue";
+import { assertMutationSucceeded, enqueueMutation, MutationRejectedError, processQueue } from "./mutation-queue";
 import type { QueuedMutation } from "./types";
 
 jest.mock("../api");
@@ -29,6 +30,7 @@ jest.mock("./db", () => ({
 
 const mockApiFetch = apiFetch as jest.MockedFunction<typeof apiFetch>;
 const mockInsertMutation = insertMutation as jest.MockedFunction<typeof insertMutation>;
+const mockListAllMutations = listAllMutations as jest.MockedFunction<typeof listAllMutations>;
 const mockListPendingMutations = listPendingMutations as jest.MockedFunction<typeof listPendingMutations>;
 const mockMarkMutationDone = markMutationDone as jest.MockedFunction<typeof markMutationDone>;
 const mockMarkMutationFailed = markMutationFailed as jest.MockedFunction<typeof markMutationFailed>;
@@ -216,5 +218,26 @@ describe("processQueue", () => {
     await processQueue({ getAccessToken: () => "token" });
 
     expect(mockMarkMutationProcessing).toHaveBeenCalledWith(1);
+  });
+});
+
+describe("assertMutationSucceeded", () => {
+  it("ne lève rien si la mutation n'est plus dans la file (rejouée avec succès)", async () => {
+    mockListAllMutations.mockResolvedValueOnce([]);
+
+    await expect(assertMutationSucceeded(1)).resolves.toBeUndefined();
+  });
+
+  it("ne lève rien si la mutation est encore pending (pas encore confirmée)", async () => {
+    mockListAllMutations.mockResolvedValueOnce([makeMutation({ id: 1, status: "pending" })]);
+
+    await expect(assertMutationSucceeded(1)).resolves.toBeUndefined();
+  });
+
+  it("lève MutationRejectedError si la mutation est en échec terminal", async () => {
+    mockListAllMutations.mockResolvedValue([makeMutation({ id: 1, status: "failed", lastError: "HTTP 403" })]);
+
+    await expect(assertMutationSucceeded(1)).rejects.toThrow(MutationRejectedError);
+    await expect(assertMutationSucceeded(1)).rejects.toThrow("HTTP 403");
   });
 });

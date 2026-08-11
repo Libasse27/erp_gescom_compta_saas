@@ -5,7 +5,7 @@ import { queryClient, withPersistenceSuspended } from "./query-client";
 export { queryClient } from "./query-client";
 export { useIsOnline } from "./network";
 export { useSyncEngine } from "./sync-engine";
-export { enqueueMutation, listMutations, processQueue } from "./mutation-queue";
+export { assertMutationSucceeded, enqueueMutation, listMutations, MutationRejectedError, processQueue } from "./mutation-queue";
 export type { EnqueueMutationInput } from "./mutation-queue";
 export type { QueuedMutation, MutationStatus, MutationScope, HttpMethod } from "./types";
 
