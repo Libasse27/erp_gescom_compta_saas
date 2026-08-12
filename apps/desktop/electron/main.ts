@@ -13,10 +13,11 @@ import path from "node:path";
 const WEB_PORT = 3001;
 const MONOREPO_ROOT = path.join(__dirname, "..", "..", "..");
 const READY_TIMEOUT_MS = 30_000;
+const READY_POLL_INTERVAL_MS = 300;
 
 let webServerProcess: ChildProcess | null = null;
 
-function startWebServer(): ChildProcess {
+export function startWebServer(): ChildProcess {
   // Suppose apps/web déjà construit (`pnpm --filter web build`) — le
   // packaging Phase 9.5 embarquera le build et ce Node runtime dans
   // l'installeur ; ce scaffold couvre uniquement le lancement en
@@ -34,8 +35,20 @@ function startWebServer(): ChildProcess {
   return child;
 }
 
-async function waitForWebServer(url: string): Promise<void> {
-  const deadline = Date.now() + READY_TIMEOUT_MS;
+export interface WaitForWebServerOptions {
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+}
+
+// timeoutMs/pollIntervalMs paramétrables (défauts = constantes ci-dessus) :
+// permet aux tests d'exercer le chemin "timeout" en millisecondes plutôt
+// qu'en attendant réellement READY_TIMEOUT_MS (30s), sans changer le
+// comportement par défaut en production.
+export async function waitForWebServer(
+  url: string,
+  { timeoutMs = READY_TIMEOUT_MS, pollIntervalMs = READY_POLL_INTERVAL_MS }: WaitForWebServerOptions = {},
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
     try {
@@ -46,13 +59,13 @@ async function waitForWebServer(url: string): Promise<void> {
     } catch {
       // Serveur pas encore prêt — nouvelle tentative après un court délai.
     }
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
 
-  throw new Error(`Le serveur web embarqué n'a pas répondu sur ${url} après ${READY_TIMEOUT_MS}ms`);
+  throw new Error(`Le serveur web embarqué n'a pas répondu sur ${url} après ${timeoutMs}ms`);
 }
 
-function createMainWindow(url: string): BrowserWindow {
+export function createMainWindow(url: string): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -82,12 +95,17 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
+// Extraites en fonctions nommées pour être testables indépendamment de
+// l'orchestration app.whenReady() ci-dessus (comportement inchangé).
+export function handleWindowAllClosed(platform: NodeJS.Platform = process.platform): void {
+  if (platform !== "darwin") {
     app.quit();
   }
-});
+}
 
-app.on("before-quit", () => {
-  webServerProcess?.kill();
-});
+export function killWebServerProcess(child: ChildProcess | null): void {
+  child?.kill();
+}
+
+app.on("window-all-closed", () => handleWindowAllClosed());
+app.on("before-quit", () => killWebServerProcess(webServerProcess));

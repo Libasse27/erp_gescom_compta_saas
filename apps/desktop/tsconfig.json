@@ -8,5 +8,6 @@
     "types": ["node"],
     "declaration": false
   },
-  "include": ["electron/**/*.ts"]
+  "include": ["electron/**/*.ts"],
+  "exclude": ["node_modules", "dist", "**/*.spec.ts"]
 }
