@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsc -p tsconfig.json && electron dist/main.js",
     "build": "tsc -p tsconfig.json",
-    "package": "pnpm build && electron-builder",
+    "package": "node scripts/package.js",
     "lint": "eslint electron",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "jest",
@@ -28,8 +28,12 @@
     "appId": "sn.erp-gescom-compta.desktop",
     "productName": "ERP Gescom Compta",
     "files": ["dist/**/*"],
+    "extraResources": [{ "from": "web-dist", "to": "web-dist" }],
     "directories": {
       "output": "release"
-    }
+    },
+    "win": { "target": "zip" },
+    "mac": { "target": "dmg" },
+    "linux": { "target": "AppImage" }
   }
 }

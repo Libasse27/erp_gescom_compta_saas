@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import path from "node:path";
 
 // 'electron' n'existe que dans le runtime Electron réel — mocké ici pour
 // pouvoir importer main.ts sous Jest (Node pur). app.whenReady() renvoie une
@@ -17,6 +18,7 @@ jest.mock("electron", () => ({
     whenReady: jest.fn(() => new Promise(() => {})),
     on: (...args: unknown[]) => mockAppOn(...args),
     quit: (...args: unknown[]) => mockAppQuit(...args),
+    isPackaged: false,
   },
   BrowserWindow: Object.assign(
     jest.fn().mockImplementation(function (this: { loadURL: typeof mockLoadURL }, options: unknown) {
@@ -35,13 +37,15 @@ jest.mock("node:child_process", () => ({
   spawn: (...args: unknown[]) => mockSpawn(...args),
 }));
 
+import { app } from "electron";
 import { createMainWindow, handleWindowAllClosed, killWebServerProcess, startWebServer, waitForWebServer } from "./main";
 
 beforeEach(() => {
   jest.clearAllMocks();
+  (app as { isPackaged: boolean }).isPackaged = false;
 });
 
-describe("startWebServer", () => {
+describe("startWebServer (développement)", () => {
   it("lance `pnpm --filter web start` depuis la racine du monorepo, en héritant des flux std", () => {
     const fakeChild = { on: jest.fn() } as unknown as ChildProcess;
     mockSpawn.mockReturnValueOnce(fakeChild);
@@ -74,6 +78,49 @@ describe("startWebServer", () => {
       expect.any(Error),
     );
     consoleError.mockRestore();
+  });
+});
+
+describe("startWebServer (packagé)", () => {
+  const originalResourcesPath = process.resourcesPath;
+
+  beforeEach(() => {
+    (app as { isPackaged: boolean }).isPackaged = true;
+    Object.defineProperty(process, "resourcesPath", { value: "C:\\fake\\resources", configurable: true });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, "resourcesPath", { value: originalResourcesPath, configurable: true });
+  });
+
+  it("lance `next start` via le point d'entrée JS déployé, exécuté en mode Node pur par le binaire Electron", () => {
+    const fakeChild = { on: jest.fn() } as unknown as ChildProcess;
+    mockSpawn.mockReturnValueOnce(fakeChild);
+
+    const child = startWebServer();
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      process.execPath,
+      [
+        expect.stringContaining(path.join("web-dist", "node_modules", "next", "dist", "bin", "next")),
+        "start",
+        "-p",
+        "3001",
+      ],
+      expect.objectContaining({
+        cwd: expect.stringContaining("web-dist"),
+        env: expect.objectContaining({ ELECTRON_RUN_AS_NODE: "1" }),
+      }),
+    );
+    expect(child).toBe(fakeChild);
+  });
+
+  it("ne dépend pas de pnpm ni du monorepo (pas d'appel à pnpm en mode packagé)", () => {
+    mockSpawn.mockReturnValueOnce({ on: jest.fn() } as unknown as ChildProcess);
+
+    startWebServer();
+
+    expect(mockSpawn).not.toHaveBeenCalledWith("pnpm", expect.anything(), expect.anything());
   });
 });
 

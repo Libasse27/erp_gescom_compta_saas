@@ -17,11 +17,38 @@ const READY_POLL_INTERVAL_MS = 300;
 
 let webServerProcess: ChildProcess | null = null;
 
-export function startWebServer(): ChildProcess {
-  // Suppose apps/web déjà construit (`pnpm --filter web build`) — le
-  // packaging Phase 9.5 embarquera le build et ce Node runtime dans
-  // l'installeur ; ce scaffold couvre uniquement le lancement en
-  // développement local.
+// En app packagée (electron-builder) : apps/web a été déployé sans pnpm ni
+// symlinks (`pnpm deploy --prod`, voir scripts/package.js) dans
+// resources/web-dist — Next.js output "standalone" a été écarté car son
+// traçage de fichiers recrée des symlinks via fs.symlink, qui échouent avec
+// EPERM sur Windows sans privilèges élevés (docs/desktop/PACKAGING.md).
+// On lance `next start` directement via son point d'entrée JS, exécuté par
+// le binaire Electron lui-même en mode Node pur (ELECTRON_RUN_AS_NODE) —
+// évite de devoir embarquer un runtime Node séparé dans l'installeur.
+function webDistDir(): string {
+  return path.join(process.resourcesPath, "web-dist");
+}
+
+function startPackagedWebServer(): ChildProcess {
+  const dir = webDistDir();
+  const nextBin = path.join(dir, "node_modules", "next", "dist", "bin", "next");
+
+  const child = spawn(process.execPath, [nextBin, "start", "-p", String(WEB_PORT)], {
+    cwd: dir,
+    stdio: "inherit",
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+  });
+
+  child.on("error", (error) => {
+    console.error("[desktop] Échec du démarrage du serveur web embarqué (packagé) :", error);
+  });
+
+  return child;
+}
+
+// En développement : apps/web tourne via le monorepo directement (pnpm doit
+// être disponible sur le PATH), pas de dossier déployé à part.
+function startDevWebServer(): ChildProcess {
   const child = spawn("pnpm", ["--filter", "web", "start"], {
     cwd: MONOREPO_ROOT,
     shell: true,
@@ -33,6 +60,10 @@ export function startWebServer(): ChildProcess {
   });
 
   return child;
+}
+
+export function startWebServer(): ChildProcess {
+  return app.isPackaged ? startPackagedWebServer() : startDevWebServer();
 }
 
 export interface WaitForWebServerOptions {
