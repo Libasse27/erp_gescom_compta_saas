@@ -50,4 +50,8 @@ export type AppStackParamList = {
   JournalEntryForm: undefined;
   JournalEntryDetail: { entryId: string };
   TrialBalance: undefined;
+  // Rapports (Phase 9.12, dernier module ERP) : lecture seule, aucun modèle
+  // Prisma propre — un seul écran agrégeant les trois rapports, pas de
+  // liste/formulaire/détail.
+  Reports: undefined;
 };

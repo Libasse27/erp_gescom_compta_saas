@@ -25,6 +25,7 @@ import { ProductsListScreen } from "./src/screens/ProductsListScreen";
 import { PurchaseDetailScreen } from "./src/screens/PurchaseDetailScreen";
 import { PurchaseFormScreen } from "./src/screens/PurchaseFormScreen";
 import { PurchasesListScreen } from "./src/screens/PurchasesListScreen";
+import { ReportsScreen } from "./src/screens/ReportsScreen";
 import { SaleDetailScreen } from "./src/screens/SaleDetailScreen";
 import { SaleFormScreen } from "./src/screens/SaleFormScreen";
 import { SalesListScreen } from "./src/screens/SalesListScreen";
@@ -111,6 +112,7 @@ function RootNavigator() {
         options={{ title: "Écriture" }}
       />
       <AppStack.Screen name="TrialBalance" component={TrialBalanceScreen} options={{ title: "Balance" }} />
+      <AppStack.Screen name="Reports" component={ReportsScreen} options={{ title: "Rapports" }} />
     </AppStack.Navigator>
   );
 }
