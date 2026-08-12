@@ -14,6 +14,9 @@ import { LoginScreen } from "./src/screens/LoginScreen";
 import { MfaVerifyScreen } from "./src/screens/MfaVerifyScreen";
 import { ProductFormScreen } from "./src/screens/ProductFormScreen";
 import { ProductsListScreen } from "./src/screens/ProductsListScreen";
+import { PurchaseDetailScreen } from "./src/screens/PurchaseDetailScreen";
+import { PurchaseFormScreen } from "./src/screens/PurchaseFormScreen";
+import { PurchasesListScreen } from "./src/screens/PurchasesListScreen";
 import { SaleDetailScreen } from "./src/screens/SaleDetailScreen";
 import { SaleFormScreen } from "./src/screens/SaleFormScreen";
 import { SalesListScreen } from "./src/screens/SalesListScreen";
@@ -75,6 +78,9 @@ function RootNavigator() {
       <AppStack.Screen name="SalesList" component={SalesListScreen} options={{ title: "Ventes" }} />
       <AppStack.Screen name="SaleForm" component={SaleFormScreen} options={{ title: "Nouvelle vente" }} />
       <AppStack.Screen name="SaleDetail" component={SaleDetailScreen} options={{ title: "Vente" }} />
+      <AppStack.Screen name="PurchasesList" component={PurchasesListScreen} options={{ title: "Achats" }} />
+      <AppStack.Screen name="PurchaseForm" component={PurchaseFormScreen} options={{ title: "Nouvel achat" }} />
+      <AppStack.Screen name="PurchaseDetail" component={PurchaseDetailScreen} options={{ title: "Achat" }} />
     </AppStack.Navigator>
   );
 }

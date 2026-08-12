@@ -14,6 +14,9 @@ export type AuthStackParamList = {
 // Ventes (Phase 9.8) : première entité à lignes — SaleForm est
 // création-uniquement (aucune route de modification des lignes côté API),
 // SaleDetail est lecture seule + actions de cycle de vie (confirmer/annuler).
+// Achats (Phase 9.9) : miroir structurel de Ventes (mêmes statuts, même
+// écrans liste/formulaire/détail), avec un champ coût unitaire saisi en plus
+// sur PurchaseForm — voir PurchaseFormScreen.tsx.
 export type AppStackParamList = {
   Home: undefined;
   ClientsList: undefined;
@@ -28,4 +31,7 @@ export type AppStackParamList = {
   SalesList: undefined;
   SaleForm: undefined;
   SaleDetail: { saleId: string };
+  PurchasesList: undefined;
+  PurchaseForm: undefined;
+  PurchaseDetail: { purchaseId: string };
 };
