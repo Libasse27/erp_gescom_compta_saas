@@ -10,6 +10,9 @@ import type { AppStackParamList, AuthStackParamList } from "./src/navigation/typ
 import { ClientFormScreen } from "./src/screens/ClientFormScreen";
 import { ClientsListScreen } from "./src/screens/ClientsListScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
+import { InvoiceDetailScreen } from "./src/screens/InvoiceDetailScreen";
+import { InvoiceFormScreen } from "./src/screens/InvoiceFormScreen";
+import { InvoicesListScreen } from "./src/screens/InvoicesListScreen";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { MfaVerifyScreen } from "./src/screens/MfaVerifyScreen";
 import { ProductFormScreen } from "./src/screens/ProductFormScreen";
@@ -81,6 +84,9 @@ function RootNavigator() {
       <AppStack.Screen name="PurchasesList" component={PurchasesListScreen} options={{ title: "Achats" }} />
       <AppStack.Screen name="PurchaseForm" component={PurchaseFormScreen} options={{ title: "Nouvel achat" }} />
       <AppStack.Screen name="PurchaseDetail" component={PurchaseDetailScreen} options={{ title: "Achat" }} />
+      <AppStack.Screen name="InvoicesList" component={InvoicesListScreen} options={{ title: "Facturation" }} />
+      <AppStack.Screen name="InvoiceForm" component={InvoiceFormScreen} options={{ title: "Nouvelle facture" }} />
+      <AppStack.Screen name="InvoiceDetail" component={InvoiceDetailScreen} options={{ title: "Facture" }} />
     </AppStack.Navigator>
   );
 }

@@ -16,7 +16,10 @@ export type AuthStackParamList = {
 // SaleDetail est lecture seule + actions de cycle de vie (confirmer/annuler).
 // Achats (Phase 9.9) : miroir structurel de Ventes (mêmes statuts, même
 // écrans liste/formulaire/détail), avec un champ coût unitaire saisi en plus
-// sur PurchaseForm — voir PurchaseFormScreen.tsx.
+// sur PurchaseForm — voir PurchaseFormScreen.tsx. Facturation (Phase 9.10) :
+// InvoiceForm ne contient qu'un picker de vente confirmée (pas de lignes,
+// jamais ressaisies — voir InvoiceFormScreen.tsx), InvoiceDetail expose
+// marquer payée/annuler à la place de confirmer/annuler.
 export type AppStackParamList = {
   Home: undefined;
   ClientsList: undefined;
@@ -34,4 +37,7 @@ export type AppStackParamList = {
   PurchasesList: undefined;
   PurchaseForm: undefined;
   PurchaseDetail: { purchaseId: string };
+  InvoicesList: undefined;
+  InvoiceForm: undefined;
+  InvoiceDetail: { invoiceId: string };
 };
