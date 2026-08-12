@@ -7,12 +7,17 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AuthProvider, useAuth } from "./src/lib/auth-context";
 import { queryClient, useSyncEngine } from "./src/lib/offline";
 import type { AppStackParamList, AuthStackParamList } from "./src/navigation/types";
+import { AccountFormScreen } from "./src/screens/AccountFormScreen";
+import { AccountsListScreen } from "./src/screens/AccountsListScreen";
 import { ClientFormScreen } from "./src/screens/ClientFormScreen";
 import { ClientsListScreen } from "./src/screens/ClientsListScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { InvoiceDetailScreen } from "./src/screens/InvoiceDetailScreen";
 import { InvoiceFormScreen } from "./src/screens/InvoiceFormScreen";
 import { InvoicesListScreen } from "./src/screens/InvoicesListScreen";
+import { JournalEntriesListScreen } from "./src/screens/JournalEntriesListScreen";
+import { JournalEntryDetailScreen } from "./src/screens/JournalEntryDetailScreen";
+import { JournalEntryFormScreen } from "./src/screens/JournalEntryFormScreen";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { MfaVerifyScreen } from "./src/screens/MfaVerifyScreen";
 import { ProductFormScreen } from "./src/screens/ProductFormScreen";
@@ -28,6 +33,7 @@ import { StockMovementFormScreen } from "./src/screens/StockMovementFormScreen";
 import { StockMovementHistoryScreen } from "./src/screens/StockMovementHistoryScreen";
 import { SupplierFormScreen } from "./src/screens/SupplierFormScreen";
 import { SuppliersListScreen } from "./src/screens/SuppliersListScreen";
+import { TrialBalanceScreen } from "./src/screens/TrialBalanceScreen";
 
 // Flux d'authentification réel (Phase 9.2, docs/adr/0012-stack-mobile.md) :
 // remplace le squelette de navigation de la Phase 9.0. La navigation
@@ -87,6 +93,24 @@ function RootNavigator() {
       <AppStack.Screen name="InvoicesList" component={InvoicesListScreen} options={{ title: "Facturation" }} />
       <AppStack.Screen name="InvoiceForm" component={InvoiceFormScreen} options={{ title: "Nouvelle facture" }} />
       <AppStack.Screen name="InvoiceDetail" component={InvoiceDetailScreen} options={{ title: "Facture" }} />
+      <AppStack.Screen name="AccountsList" component={AccountsListScreen} options={{ title: "Comptabilité" }} />
+      <AppStack.Screen name="AccountForm" component={AccountFormScreen} options={{ title: "Nouveau compte" }} />
+      <AppStack.Screen
+        name="JournalEntriesList"
+        component={JournalEntriesListScreen}
+        options={{ title: "Écritures" }}
+      />
+      <AppStack.Screen
+        name="JournalEntryForm"
+        component={JournalEntryFormScreen}
+        options={{ title: "Nouvelle écriture" }}
+      />
+      <AppStack.Screen
+        name="JournalEntryDetail"
+        component={JournalEntryDetailScreen}
+        options={{ title: "Écriture" }}
+      />
+      <AppStack.Screen name="TrialBalance" component={TrialBalanceScreen} options={{ title: "Balance" }} />
     </AppStack.Navigator>
   );
 }

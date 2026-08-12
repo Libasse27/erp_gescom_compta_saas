@@ -22,6 +22,7 @@ export function HomeScreen({ navigation }: Props) {
   const canReadSales = useHasPermission("sales.read");
   const canReadPurchases = useHasPermission("purchases.read");
   const canReadInvoicing = useHasPermission("invoicing.read");
+  const canReadAccounting = useHasPermission("accounting.read");
 
   return (
     <View style={styles.container}>
@@ -60,6 +61,11 @@ export function HomeScreen({ navigation }: Props) {
       {canReadInvoicing ? (
         <Pressable style={styles.button} onPress={() => navigation.navigate("InvoicesList")}>
           <Text style={styles.buttonText}>Facturation</Text>
+        </Pressable>
+      ) : null}
+      {canReadAccounting ? (
+        <Pressable style={styles.button} onPress={() => navigation.navigate("AccountsList")}>
+          <Text style={styles.buttonText}>Comptabilité</Text>
         </Pressable>
       ) : null}
       <Pressable style={styles.button} onPress={() => void logout()}>

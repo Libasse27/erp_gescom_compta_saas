@@ -19,7 +19,11 @@ export type AuthStackParamList = {
 // sur PurchaseForm — voir PurchaseFormScreen.tsx. Facturation (Phase 9.10) :
 // InvoiceForm ne contient qu'un picker de vente confirmée (pas de lignes,
 // jamais ressaisies — voir InvoiceFormScreen.tsx), InvoiceDetail expose
-// marquer payée/annuler à la place de confirmer/annuler.
+// marquer payée/annuler à la place de confirmer/annuler. Comptabilité
+// (Phase 9.11) : deux ressources distinctes (Account, JournalEntry) plutôt
+// qu'une seule fiche — AccountsList est l'entrée Home, JournalEntriesList et
+// TrialBalance ne sont atteints que depuis AccountsList (même sortie que
+// StockMovementHistory/Form depuis StockLevels, module 4).
 export type AppStackParamList = {
   Home: undefined;
   ClientsList: undefined;
@@ -40,4 +44,10 @@ export type AppStackParamList = {
   InvoicesList: undefined;
   InvoiceForm: undefined;
   InvoiceDetail: { invoiceId: string };
+  AccountsList: undefined;
+  AccountForm: undefined;
+  JournalEntriesList: undefined;
+  JournalEntryForm: undefined;
+  JournalEntryDetail: { entryId: string };
+  TrialBalance: undefined;
 };
