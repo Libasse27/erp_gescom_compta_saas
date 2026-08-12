@@ -19,6 +19,18 @@ const DEHYDRATE_ALLOW_LIST: readonly (readonly unknown[])[] = [
   ["sales"], // liste des ventes (Phase 9.8)
   ["sale"], // détail d'une vente avec ses lignes (Phase 9.8) — préfixe exact,
   // ne recoupe pas ["sales"] (égalité de segment stricte, "sale" !== "sales")
+  ["purchases"], // liste des achats (Phase 9.9)
+  ["purchase"], // détail d'un achat avec ses lignes (Phase 9.9) — même
+  // distinction de préfixe exact que sale/sales
+  ["invoices"], // liste des factures (Phase 9.10)
+  ["invoice"], // détail d'une facture avec ses lignes (Phase 9.10)
+  ["accounting-accounts"], // plan comptable, avec solde (Phase 9.11)
+  ["accounting-trial-balance"], // balance des comptes, jamais paginée (Phase 9.11)
+  ["journal-entries"], // liste des écritures (Phase 9.11)
+  ["journal-entry"], // détail d'une écriture avec ses lignes (Phase 9.11)
+  ["reports-sales"], // rapport des ventes (Phase 9.12)
+  ["reports-purchases"], // rapport des achats (Phase 9.12)
+  ["reports-income-statement"], // compte de résultat simplifié (Phase 9.12)
   ["users", "me", "context"], // permissions — sans ça, un cold start
   // hors-ligne masquerait les entrées "Clients"/"Fournisseurs" alors que
   // leurs listes, elles, resteraient consultables depuis le cache.

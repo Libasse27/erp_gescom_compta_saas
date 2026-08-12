@@ -53,6 +53,32 @@ describe("isAllowedToPersist", () => {
     expect(isAllowedToPersist(["sale"])).toBe(true);
   });
 
+  it("autorise les clés purchases (liste et fiche), sans collision entre elles", () => {
+    expect(isAllowedToPersist(["purchases"])).toBe(true);
+    expect(isAllowedToPersist(["purchases", { page: 1, pageSize: 20 }])).toBe(true);
+    expect(isAllowedToPersist(["purchase", "p1"])).toBe(true);
+  });
+
+  it("autorise les clés invoices (liste et fiche), sans collision entre elles", () => {
+    expect(isAllowedToPersist(["invoices"])).toBe(true);
+    expect(isAllowedToPersist(["invoices", { page: 1, pageSize: 20 }])).toBe(true);
+    expect(isAllowedToPersist(["invoice", "i1"])).toBe(true);
+  });
+
+  it("autorise les clés comptabilité (comptes, balance, écritures)", () => {
+    expect(isAllowedToPersist(["accounting-accounts"])).toBe(true);
+    expect(isAllowedToPersist(["accounting-accounts", { page: 1, pageSize: 20 }])).toBe(true);
+    expect(isAllowedToPersist(["accounting-trial-balance"])).toBe(true);
+    expect(isAllowedToPersist(["journal-entries"])).toBe(true);
+    expect(isAllowedToPersist(["journal-entry", "j1"])).toBe(true);
+  });
+
+  it("autorise les clés rapports (ventes, achats, compte de résultat)", () => {
+    expect(isAllowedToPersist(["reports-sales", { dateFrom: "2026-08-01" }])).toBe(true);
+    expect(isAllowedToPersist(["reports-purchases", { dateFrom: "2026-08-01" }])).toBe(true);
+    expect(isAllowedToPersist(["reports-income-statement", {}])).toBe(true);
+  });
+
   it("autorise le contexte utilisateur (permissions)", () => {
     expect(isAllowedToPersist(["users", "me", "context"])).toBe(true);
   });
