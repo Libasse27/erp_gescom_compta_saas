@@ -28,7 +28,7 @@
     "appId": "sn.erp-gescom-compta.desktop",
     "productName": "ERP Gescom Compta",
     "files": ["dist/**/*"],
-    "extraResources": [{ "from": "web-dist", "to": "web-dist" }],
+    "extraResources": [{ "from": ".", "to": ".", "filter": ["web-dist/**/*"] }],
     "directories": {
       "output": "release"
     },

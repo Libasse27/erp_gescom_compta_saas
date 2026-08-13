@@ -6,9 +6,17 @@
 // Utilise `pnpm deploy` plutôt que la sortie Next.js `output: "standalone"` :
 // ce dernier recrée des symlinks via fs.symlink lors du traçage des
 // fichiers, ce qui échoue avec EPERM sur Windows sans privilèges élevés.
-// `pnpm deploy` matérialise le node_modules déployé avec des jonctions
-// Windows (autorisées sans élévation), qu'electron-builder peut ensuite
-// empaqueter normalement (voir docs/desktop/PACKAGING.md).
+//
+// `--config.node-linker=hoisted` est déterminant : par défaut, `pnpm deploy`
+// matérialise le node_modules déployé avec des jonctions Windows vers un
+// store virtuel `.pnpm/` — electron-builder copie ces jonctions sans erreur,
+// mais son parcours de fichiers ne les traverse pas, si bien que le paquet
+// final se retrouvait avec un `node_modules` vide (voir
+// docs/desktop/PACKAGING.md, section « Ce qui ne fonctionne pas encore »).
+// Le linker "hoisted" produit un node_modules classique, à plat, sans aucune
+// jonction ni store virtuel — un simple arbre de fichiers réels que
+// n'importe quel outil de copie (electron-builder inclus) gère normalement.
+const NODE_LINKER = "--config.node-linker=hoisted";
 const { execSync } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
@@ -25,7 +33,7 @@ function run(command, cwd) {
 run("pnpm --filter web build", monorepoRoot);
 
 fs.rmSync(webDistDir, { recursive: true, force: true });
-run(`pnpm --filter web deploy "${webDistDir}" --prod`, monorepoRoot);
+run(`pnpm --filter web deploy "${webDistDir}" --prod ${NODE_LINKER}`, monorepoRoot);
 
 run("pnpm build", desktopRoot);
 run("electron-builder", desktopRoot);
