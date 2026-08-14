@@ -670,6 +670,31 @@ ici, chacune nécessite un choix structurant) :
 À trancher via un ADR dédié avant la Phase 10, en même temps que la stratégie
 Docker/packaging.
 
+> Réalisé (2026-08-14, Phase 10.0) : ADR `docs/adr/0016-...` — cause racine
+> confirmée dans le code (pas supposée) : les 7 packages partagés
+> (`types/validation/permissions/utils/auth/config/ui`) exposaient
+> `main`/`types` vers leur `src/index.ts` brut, compilé en `module: ESNext`,
+> alors qu'`apps/api` compile en `module: CommonJS` (`nest build`) — au
+> runtime, `node dist/main.js` faisait `require('@erp/validation')`, résolu
+> vers un `.ts` brut que Node ne sait pas charger sans `ts-node` (absent en
+> prod). Correctif : les 7 packages compilent désormais en CommonJS
+> (`module: CommonJS`, `moduleResolution: Node10`, alignés sur `apps/api`),
+> `main`/`types` pointent vers `dist/index.js`/`dist/index.d.ts` ; `turbo.json`
+> (`dev` dépend maintenant de `^build`, comme `build`/`lint`/`typecheck`/
+> `test`/`test:tenant` le faisaient déjà). Aucune nouvelle dépendance.
+> Vérifié : `pnpm build` (monorepo complet, 11/11), puis `node dist/main.js`
+> démarre réellement (les 25+ modules Nest s'initialisent, toutes les routes
+> se mappent — exactement le chemin qui plantait avant), `pnpm typecheck`
+> (15/15) et `pnpm lint` (15/15) verts sans régression. **Écart assumé et
+> déclaré explicitement** (CLAUDE.md §4, un critère non satisfait doit être
+> déclaré plutôt que contourné) : `pnpm test`/`pnpm test:tenant` n'ont **pas**
+> pu être exécutés à ce commit — Docker Desktop indisponible dans
+> l'environnement d'exécution au moment du commit (npipe
+> `dockerDesktopLinuxEngine` injoignable), donc pas de Postgres pour les
+> tests d'intégration réels. À exécuter et vérifier dès que Docker
+> Desktop/Postgres est disponible, avant de considérer la 10.0 définitivement
+> close.
+
 ---
 
 ## E. LES 5 TESTS QUI CONDITIONNENT LA LIVRAISON
