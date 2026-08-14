@@ -685,15 +685,12 @@ Docker/packaging.
 > Vérifié : `pnpm build` (monorepo complet, 11/11), puis `node dist/main.js`
 > démarre réellement (les 25+ modules Nest s'initialisent, toutes les routes
 > se mappent — exactement le chemin qui plantait avant), `pnpm typecheck`
-> (15/15) et `pnpm lint` (15/15) verts sans régression. **Écart assumé et
-> déclaré explicitement** (CLAUDE.md §4, un critère non satisfait doit être
-> déclaré plutôt que contourné) : `pnpm test`/`pnpm test:tenant` n'ont **pas**
-> pu être exécutés à ce commit — Docker Desktop indisponible dans
-> l'environnement d'exécution au moment du commit (npipe
-> `dockerDesktopLinuxEngine` injoignable), donc pas de Postgres pour les
-> tests d'intégration réels. À exécuter et vérifier dès que Docker
-> Desktop/Postgres est disponible, avant de considérer la 10.0 définitivement
-> close.
+> (15/15) et `pnpm lint` (15/15) verts sans régression. `pnpm test` (54
+> suites, 276 tests) et `pnpm test:tenant` (10 suites, 41 tests, y compris
+> le test générique `tenant-isolation.tenant.spec.ts`) verts sans régression,
+> exécutés contre Postgres réel (`docker/docker-compose.dev.yml`) une fois
+> Docker Desktop disponible. Les 6 critères de vérification de la Phase 10.0
+> sont satisfaits.
 
 ---
 
