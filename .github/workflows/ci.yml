@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Annule les exécutions précédentes du même PR/branche dès qu'un nouveau
+# push arrive — évite de consommer des minutes CI sur un état déjà obsolète.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Identifiants de dev (docker/docker-compose.dev.yml) — pas des secrets,
+  # jamais utilisés hors CI/local. Base de test dédiée, jamais la base de
+  # dev (voir apps/api/test/global-setup.js et setup-env.js).
+  DATABASE_URL: postgresql://erp:erp_dev_password@localhost:5432/erp_saas_test?schema=public
+  # Rôle RLS (docs/adr/0008-...) créé par la migration
+  # 20260809113836_add_tenant_role_and_rls avec ce mot de passe de dev en
+  # dur — acceptable en CI, jamais en production (voir
+  # scripts/prod-post-deploy.sh et docs/PROMPT-MAITRE-SAAS.md Phase 10.1).
+  TENANT_DATABASE_URL: postgresql://erp_app_tenant:erp_tenant_dev_password@localhost:5432/erp_saas_test?schema=public
+  JWT_ACCESS_SECRET: ci-jwt-access-secret-at-least-32-characters-long
+  JWT_ACCESS_TTL: 15m
+  JWT_REFRESH_TTL: 30d
+  MFA_ENCRYPTION_KEY: ci-mfa-encryption-key-at-least-32-characters
+  PAYMENT_WEBHOOK_SECRET_WAVE: ci-webhook-secret-wave
+  PAYMENT_WEBHOOK_SECRET_ORANGE_MONEY: ci-webhook-secret-orange-money
+  PAYMENT_WEBHOOK_SECRET_FREE_MONEY: ci-webhook-secret-free-money
+  PAYMENT_WEBHOOK_SECRET_STRIPE: ci-webhook-secret-stripe
+  PAYMENT_WEBHOOK_SECRET_CARD: ci-webhook-secret-card
+  PAYMENT_GRACE_PERIOD_DAYS: "7"
+  CORS_ALLOWED_ORIGINS: http://localhost:3001
+  NEXT_PUBLIC_API_URL: http://localhost:3000
+
+jobs:
+  ci:
+    name: typecheck · lint · build · test · test:tenant
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: erp
+          POSTGRES_PASSWORD: erp_dev_password
+          POSTGRES_DB: erp_saas_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U erp -d erp_saas_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Installer pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - name: Installer Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Installer les dépendances
+        run: pnpm install --frozen-lockfile
+
+      # @prisma/client ne trouve pas toujours le schéma (apps/api/prisma/
+      # schema.prisma) depuis le postinstall exécuté à la racine du
+      # monorepo — génération explicite, requise avant tout typecheck/build
+      # touchant apps/api (le code importe des types générés depuis le
+      # schéma). Vécu et documenté en vérifiant la Phase 10.1
+      # (apps/api/Dockerfile suit le même ordre).
+      - name: Générer le client Prisma
+        run: pnpm --filter=@erp/api exec prisma generate
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Build
+        run: pnpm build
+
+      # Les migrations de la base de test sont appliquées automatiquement
+      # par apps/api/test/global-setup.js au démarrage de Jest — pas
+      # d'étape "migrate" séparée ici.
+      - name: Tests
+        run: pnpm test
+
+      - name: Tests d'isolation multi-tenant (bloquant)
+        run: pnpm test:tenant
