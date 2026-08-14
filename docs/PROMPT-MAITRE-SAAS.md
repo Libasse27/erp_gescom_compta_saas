@@ -770,6 +770,32 @@ Docker/packaging.
 > structurés + `/health` (10.5), reverse proxy Caddy/HTTPS +
 > `docs/deployment/PRODUCTION.md` (10.6).
 
+> Réalisé (2026-08-14, Phase 10.2 — CI) : `.github/workflows/ci.yml`, sur
+> chaque `push`/`pull_request` vers `main` — `pnpm install` →
+> `prisma generate` (explicite, même contrainte qu'en 10.1) →
+> `typecheck` → `lint` → `build` → `test` → `test:tenant`, tous bloquants,
+> aucun facultatif. Service container `postgres:16-alpine` dédié (base
+> `erp_saas_test`, identifiants de dev — pas des secrets), migrations de
+> test appliquées automatiquement par `apps/api/test/global-setup.js`
+> (aucune étape séparée). Portée validée avec l'utilisateur : CI seule,
+> pas de CD (aucun VPS cible réel aujourd'hui) — documenté dans
+> `docs/deployment/CI-CD.md`, avec la marche à suivre pour étendre plus
+> tard (job `deploy`, secrets SSH/registre, `docker compose` sur le VPS) et
+> pour activer la protection de branche (changement de paramètres du
+> dépôt, hors périmètre code, à faire par un mainteneur).
+>
+> **Vérifié localement au-delà de la simple syntaxe YAML** :
+> `apps/api/.env` temporairement écarté, exactement les mêmes variables
+> d'environnement que le workflow exportées directement dans le shell,
+> `prisma generate` puis la suite complète d'`apps/api` (54 suites,
+> 276 tests) passent sans `.env` — preuve que l'approche "tout par
+> variables d'environnement CI" fonctionne réellement, pas seulement sur le
+> papier. **Écart assumé et déclaré explicitement** (CLAUDE.md §4) :
+> l'exécution réelle sur GitHub Actions elle-même n'a **pas** pu être
+> vérifiée à ce commit — nécessite un `git push` vers `origin`, qui
+> requiert un accord explicite de l'utilisateur (CLAUDE.md §1/§3),
+> non obtenu à ce stade. À vérifier dès le premier push.
+
 ---
 
 ## E. LES 5 TESTS QUI CONDITIONNENT LA LIVRAISON
