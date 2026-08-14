@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1
+# Contexte de build : la racine du monorepo (comme apps/api/Dockerfile).
+# NEXT_PUBLIC_API_URL est inlinée au build (variable NEXT_PUBLIC_*), donc
+# fournie en --build-arg, pas seulement en variable d'environnement runtime.
+
+FROM node:20-alpine AS base
+RUN corepack enable
+RUN npm install -g turbo@2.1.3
+
+FROM base AS pruner
+WORKDIR /app
+COPY . .
+RUN turbo prune @erp/web --docker
+
+FROM base AS builder
+WORKDIR /app
+COPY --from=pruner /app/out/json/ .
+COPY --from=pruner /app/out/pnpm-lock.yaml ./pnpm-lock.yaml
+RUN pnpm install --frozen-lockfile
+COPY --from=pruner /app/out/full/ .
+# Même remarque que apps/api/Dockerfile : tsconfig.base.json n'est pas dans
+# le graphe de workspaces élagué par turbo prune.
+COPY --from=pruner /app/tsconfig.base.json ./tsconfig.base.json
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# Active output:"standalone" (apps/web/next.config.mjs) uniquement ici — sur
+# Windows, ce mode échoue en dehors de Docker (liens symboliques EPERM).
+ENV DOCKER_BUILD=true
+RUN pnpm turbo run build --filter=@erp/web...
+
+FROM base AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001 -G nodejs
+# Pas de apps/web/public/ pour l'instant (aucun asset statique) — à
+# réintroduire ici (COPY --from=builder /app/apps/web/public ./apps/web/public)
+# le jour où ce dossier apparaît.
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
+USER nextjs
+ENV PORT=3001
+EXPOSE 3001
+CMD ["node", "apps/web/server.js"]

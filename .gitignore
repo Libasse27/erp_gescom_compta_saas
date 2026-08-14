@@ -14,6 +14,7 @@ apps/desktop/web-dist/
 .env
 .env.local
 .env.*.local
+docker/.env.prod
 coverage/
 .DS_Store
 *.log

@@ -692,6 +692,84 @@ Docker/packaging.
 > Docker Desktop disponible. Les 6 critères de vérification de la Phase 10.0
 > sont satisfaits.
 
+> Réalisé (2026-08-14, Phase 10.1 — Conteneurisation) : cible retenue avec
+> l'utilisateur — VPS + Docker Compose, CI seule pour l'instant (pas de CD,
+> aucun VPS réel à cibler aujourd'hui). `apps/api/Dockerfile` et
+> `apps/web/Dockerfile` : build multi-stage via `turbo prune --docker`
+> (pattern officiel Turborepo — stage `pruner` élague le monorepo au seul
+> sous-graphe nécessaire, `builder` installe/compile, `runner` final
+> minimal, utilisateur non-root). `apps/web` reçoit `output: "standalone"`
+> (bundle serveur Next.js auto-suffisant, nécessaire à l'image de
+> production). `docker/docker-compose.prod.yml` (postgres + api + web, nom
+> de projet Compose explicite — voir incident ci-dessous) et
+> `docker/.env.prod.example`. `scripts/prod-post-deploy.sh` : exécute
+> `prisma migrate deploy` puis fait tourner un `ALTER ROLE erp_app_tenant`
+> pour remplacer le mot de passe de dev codé en dur dans la migration
+> `20260809113836_add_tenant_role_and_rls` (`erp_tenant_dev_password`,
+> acceptable en dev/CI uniquement) — on ne modifie jamais une migration déjà
+> appliquée, donc rotation post-déploiement plutôt que correction de la
+> migration elle-même.
+>
+> **Vérifié de bout en bout, pas seulement "ça build"** : `docker compose up`
+> a démarré postgres+api+web avec de vrais secrets générés dans un
+> `docker/.env.prod` jetable, les 16 migrations se sont appliquées, le mot
+> de passe du rôle tenant a été effectivement changé, `GET /v1/plans` sur le
+> conteneur API a répondu `200` avec un vrai tableau JSON, `GET /login` sur
+> le conteneur web a répondu `200` avec du HTML SSR Next.js réel — puis
+> extinction propre (`down -v`), `docker/.env.prod` supprimé (jamais
+> commité). `pnpm typecheck` (15/15), `pnpm lint` (15/15), `pnpm build`
+> (11/11), `pnpm test` (54 suites/276 tests) et `pnpm test:tenant`
+> (10 suites/41 tests) verts sans régression sur tout le monorepo.
+>
+> **Incidents réels rencontrés et corrigés en vérifiant cette phase**
+> (documentés ici pour tout futur travail Docker/infra sur ce dépôt) :
+> 1. **Collision de nom de projet Compose** : `docker-compose.dev.yml` et
+>    `docker-compose.prod.yml` partageaient le même nom de projet implicite
+>    (`docker`, dérivé de leur dossier parent commun) — un `up` sur le
+>    fichier prod a fait croire à Compose qu'il devait "recréer" le service
+>    `postgres` du projet, détruisant le conteneur `erp_saas_postgres_dev`
+>    **en cours d'exécution**. Les données ont survécu (volume nommé
+>    distinct, jamais touché), seul le conteneur a été recréé — restauré et
+>    vérifié intact (comptage de lignes). Corrigé par un `name:
+>    erp_saas_prod` explicite en tête de `docker-compose.prod.yml` — **à
+>    reproduire pour tout futur fichier compose de ce dépôt**, sous peine de
+>    répéter cet incident.
+> 2. **OpenSSL manquant sur Alpine** : `node:20-alpine` embarque déjà
+>    `libssl.so.3` mais pas le binaire `openssl` que le script de détection
+>    de Prisma utilise à `prisma generate` — sans lui, Prisma cible la
+>    mauvaise version d'OpenSSL pour son moteur, qui plante au runtime avec
+>    une erreur non-JSON illisible. Corrigé par `apk add --no-cache openssl`
+>    dans le stage de base.
+> 3. **`turbo prune` et fichiers racine** : `out/full` ne contient que le
+>    graphe de workspaces élagué (apps/packages), pas les fichiers racine
+>    référencés via `extends` côté tsconfig (`tsconfig.base.json`) — copiés
+>    explicitement depuis le stage `pruner` (non élagué, lui, a accès au
+>    contexte complet).
+> 4. **Ordre `prisma generate` / `nest build`** : le client Prisma doit être
+>    généré **avant** la compilation TypeScript — le code source importe des
+>    types générés spécifiques au schéma (`Prisma.XxxWhereInput`, modèles)
+>    qui n'existent pas dans le client par défaut.
+> 5. **`docker compose` ne reconstruit pas automatiquement** : `docker
+>    compose run`/`up` réutilise silencieusement une image déjà taguée sous
+>    le nom dérivé du service, même après modification du Dockerfile — a
+>    fait réapparaître le bug OpenSSL (point 2) via `docker compose run api`
+>    alors que l'image autonome de test était déjà corrigée. `docker compose
+>    build` explicite nécessaire après tout changement de Dockerfile.
+> 6. **`output: "standalone"` casse `pnpm build` nativement sur Windows** :
+>    Next.js tente de créer des liens symboliques pour le tracing des
+>    dépendances en mode standalone, ce qui échoue sans mode
+>    développeur/droits élevés sur Windows (`EPERM`), alors que ça fonctionne
+>    sans problème dans le conteneur Docker (Linux). Corrigé en conditionnant
+>    `output: "standalone"` (apps/web/next.config.mjs) à
+>    `process.env.DOCKER_BUILD === "true"`, variable posée uniquement dans
+>    `apps/web/Dockerfile` juste avant le build — jamais activée par un
+>    `pnpm build` natif.
+>
+> Reste pour la suite de la Phase 10 : CI (10.2), migrations
+> automatisées/rollback documenté (10.3), sauvegardes testées (10.4), logs
+> structurés + `/health` (10.5), reverse proxy Caddy/HTTPS +
+> `docs/deployment/PRODUCTION.md` (10.6).
+
 ---
 
 ## E. LES 5 TESTS QUI CONDITIONNENT LA LIVRAISON
