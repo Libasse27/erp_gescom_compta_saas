@@ -915,6 +915,47 @@ Docker/packaging.
 > Reste pour la suite de la Phase 10 : reverse proxy Caddy/HTTPS +
 > `docs/deployment/PRODUCTION.md` (10.6).
 
+> Réalisé (2026-08-15, Phase 10.6 — Reverse proxy Caddy/HTTPS) : Caddy
+> retenu plutôt que nginx+certbot (renouvellement manuel) ou Traefik
+> (complexité de découverte dynamique inutile pour deux services fixes) —
+> décision et alternatives dans `docs/adr/0017-caddy-reverse-proxy-https.md`.
+> `docker/Caddyfile` route par domaine (`API_DOMAIN`/`WEB_DOMAIN`,
+> `docker/.env.prod`) vers `api:3000`/`web:3001` sur le réseau Docker
+> interne ; `docker-compose.prod.yml` gagne un service `caddy` (ports
+> 80/443, volumes `erp_saas_caddy_data`/`erp_saas_caddy_config` pour
+> persister les certificats entre recréations du conteneur) et **`api`/`web`
+> ne publient plus aucun port sur l'hôte** — Caddy devient le seul point
+> d'entrée externe. `docs/deployment/PRODUCTION.md` nouveau : runbook de
+> premier déploiement sur VPS neuf, et point d'entrée qui assemble les
+> Phases 10.1–10.5 (CI-CD.md, MIGRATIONS.md, BACKUPS.md, LOGGING.md) plutôt
+> que de dupliquer leur contenu ; section « montée en charge » qui documente
+> les limites connues (Postgres instance unique, pas de Redis pour un rate
+> limiting distribué) sans les implémenter prématurément — rien à mettre à
+> l'échelle sans trafic réel.
+>
+> **Écart assumé, comme pour la CD (10.2) et la copie hors-hôte des
+> sauvegardes (10.4)** : aucun VPS/domaine public réel disponible ici pour
+> obtenir un vrai certificat Let's Encrypt. **Vérifié malgré tout, pas
+> seulement documenté** : `docker/Caddyfile.local-test` (mode `tls
+> internal`, jamais utilisé en production) monté via
+> `docker/docker-compose.local-test-override.yml` sur la stack Docker prod
+> réelle (postgres → migrations → api/web/caddy, secrets jetables) — exerce
+> le même mécanisme de reverse proxy que le Caddyfile de production, seule
+> l'autorité de certification diffère. Confirmé : `https://api.…/health` et
+> `https://app.…/login` à travers Caddy répondent `200` avec le vrai contenu
+> (JSON santé réel, HTML SSR Next.js réel) ; une requête `http://` (port 80)
+> est bien redirigée `308` vers `https://` ; les anciens ports hôte 3000/3001
+> (retirés par cette phase) sont désormais refusés — confirme que Caddy est
+> réellement le seul chemin d'entrée. Stack éteinte proprement (`down -v`),
+> `docker/.env.prod` supprimé. `pnpm typecheck`/`lint`/`test`/`test:tenant`/
+> `build` verts sans régression (cette phase ne touche que `docker/`,
+> `docs/adr/` et `docs/deployment/`, aucun code applicatif).
+>
+> **Phase 10 close ici** (10.0 à 10.6 toutes réalisées) — écart restant déjà
+> signalé en 10.2 : la CI n'a jamais réellement tourné sur GitHub Actions
+> avant le premier `git push` (fait depuis, avec accord explicite de
+> l'utilisateur) ; le statut du premier run réel reste à confirmer.
+
 ---
 
 ## E. LES 5 TESTS QUI CONDITIONNENT LA LIVRAISON

@@ -1,0 +1,18 @@
+# Variante de docker/Caddyfile pour vérifier le mécanisme de reverse proxy
+# SANS domaine public réel (Phase 10.6, docs/adr/0017-...) — jamais montée
+# par docker-compose.prod.yml, jamais utilisée en production. `tls internal`
+# fait émettre un certificat auto-signé par l'autorité locale intégrée à
+# Caddy au lieu de tenter un vrai provisionnement ACME/Let's Encrypt
+# (impossible sans domaine public joignable depuis Internet). Le routage par
+# domaine et la transmission des en-têtes sont exactement les mêmes que dans
+# le Caddyfile de production — voir docs/deployment/PRODUCTION.md pour la
+# procédure de vérification complète.
+{$API_DOMAIN} {
+	tls internal
+	reverse_proxy api:3000
+}
+
+{$WEB_DOMAIN} {
+	tls internal
+	reverse_proxy web:3001
+}

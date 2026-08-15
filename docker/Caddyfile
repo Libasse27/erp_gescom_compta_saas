@@ -1,0 +1,22 @@
+# Phase 10.6 — voir docs/adr/0017-caddy-reverse-proxy-https.md et
+# docs/deployment/PRODUCTION.md. Templaté par variables d'environnement
+# (docker/.env.prod : API_DOMAIN, WEB_DOMAIN, ACME_EMAIL) — Caddy résout
+# {$VAR} depuis son propre environnement (docker-compose.prod.yml les lui
+# transmet), pas besoin de préprocesseur.
+#
+# HTTPS automatique par défaut pour tout domaine réel (obtention ET
+# renouvellement Let's Encrypt) : aucune directive TLS explicite requise en
+# production. Pour une vérification locale sans domaine public réel, voir
+# docker/Caddyfile.local-test (non utilisé en production, jamais monté par
+# docker-compose.prod.yml).
+{
+	email {$ACME_EMAIL}
+}
+
+{$API_DOMAIN} {
+	reverse_proxy api:3000
+}
+
+{$WEB_DOMAIN} {
+	reverse_proxy web:3001
+}

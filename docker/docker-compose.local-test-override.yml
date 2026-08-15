@@ -1,0 +1,6 @@
+services:
+  caddy:
+    volumes:
+      - ./Caddyfile.local-test:/etc/caddy/Caddyfile:ro
+      - erp_saas_caddy_data:/data
+      - erp_saas_caddy_config:/config

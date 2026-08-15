@@ -50,11 +50,9 @@ services:
       PAYMENT_WEBHOOK_SECRET_CARD: ${PAYMENT_WEBHOOK_SECRET_CARD}
       PAYMENT_GRACE_PERIOD_DAYS: ${PAYMENT_GRACE_PERIOD_DAYS}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
-    # Publié directement pour l'instant (pas encore de reverse proxy — voir
-    # Phase 10.6). À restreindre à 127.0.0.1 ou retirer une fois Caddy en
-    # place devant l'API.
-    ports:
-      - "3000:3000"
+    # Pas de port publié sur l'hôte (Phase 10.6, docs/adr/0017-...) : Caddy
+    # est désormais le seul point d'entrée externe, il joint ce service par
+    # son nom sur le réseau Docker interne (reverse_proxy api:3000).
     # GET /health (Phase 10.5) — pas de curl/wget dans l'image runner
     # (Alpine minimal), Node lui-même fait la requête pour ne pas ajouter de
     # paquet uniquement pour ça.
@@ -85,10 +83,33 @@ services:
       - api
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
-    # Même remarque que le service api : publié directement en attendant la
-    # Phase 10.6 (reverse proxy Caddy + HTTPS).
+    # Même remarque que le service api : pas de port publié, Caddy joint ce
+    # service par son nom sur le réseau Docker interne.
+    networks:
+      - erp_saas_prod
+
+  # Phase 10.6, docs/adr/0017-caddy-reverse-proxy-https.md : seul point
+  # d'entrée réseau externe de la stack (api/web ne publient plus de port).
+  # HTTPS automatique (obtention + renouvellement Let's Encrypt) pour tout
+  # domaine public réel pointé vers ce VPS — aucune tâche cron à ajouter.
+  caddy:
+    image: caddy:2-alpine
+    container_name: erp_saas_caddy_prod
+    restart: unless-stopped
+    depends_on:
+      - api
+      - web
+    environment:
+      API_DOMAIN: ${API_DOMAIN}
+      WEB_DOMAIN: ${WEB_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
     ports:
-      - "3001:3001"
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - erp_saas_caddy_data:/data
+      - erp_saas_caddy_config:/config
     networks:
       - erp_saas_prod
 
@@ -97,3 +118,8 @@ networks:
 
 volumes:
   erp_saas_postgres_prod_data:
+  # Persiste les certificats TLS obtenus (Let's Encrypt) : sans ce volume,
+  # Caddy redemanderait un certificat neuf à chaque recréation du
+  # conteneur, au risque de heurter le rate limit de Let's Encrypt.
+  erp_saas_caddy_data:
+  erp_saas_caddy_config:
