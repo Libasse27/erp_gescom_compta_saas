@@ -796,6 +796,41 @@ Docker/packaging.
 > requiert un accord explicite de l'utilisateur (CLAUDE.md §1/§3),
 > non obtenu à ce stade. À vérifier dès le premier push.
 
+> Réalisé (2026-08-15, Phase 10.3 — Migrations : déploiement et rollback) :
+> le déploiement (`prisma migrate deploy`) était déjà automatisé en CI
+> (10.2) et en prod (`scripts/prod-post-deploy.sh`, 10.1) — la seule pièce
+> manquante était la stratégie de rollback, absente de Prisma Migrate par
+> conception (pas de migration "down" générée automatiquement — trop
+> dangereux dès qu'une migration touche des données). `docs/deployment/
+> MIGRATIONS.md` documente une stratégie à deux niveaux : (1) migration en
+> échec au déploiement (`P3018`) → corriger la cause, débloquer
+> `_prisma_migrations` via le nouveau `scripts/db-migrate-resolve-failed.sh`
+> (`prisma migrate resolve --rolled-back`), relancer le déploiement ; (2)
+> migration appliquée avec succès mais dont l'effet doit être défait →
+> roll-forward (migration corrective) par défaut, restauration de
+> sauvegarde (Phase 10.4) seulement si des données sont irrécupérables
+> autrement. Fait vérifié dans le code (pas supposé) : aucune des 16
+> migrations existantes n'utilise d'opération non-transactionnelle
+> (`CONCURRENTLY` ou équivalent) — chacune s'applique donc entièrement ou
+> pas du tout, un échec ne laisse jamais de DDL partiel en base.
+>
+> **Vérifié de bout en bout sur un Postgres jetable** (conteneur isolé,
+> détruit après coup — base de dev persistante non touchée) : les 16
+> migrations réelles appliquées avec succès sur une base vierge, une
+> migration invalide injectée puis un `prisma migrate deploy` a échoué avec
+> `P3018` exactement comme documenté, `_prisma_migrations` confirmé en
+> échec (`finished_at`/`rolled_back_at` NULL), `prisma migrate resolve
+> --rolled-back` a débloqué l'historique, puis un `migrate deploy` propre
+> a suivi (`No pending migrations to apply.`) une fois la migration
+> invalide retirée. Aucun fichier de migration réel modifié pour ce test.
+> `pnpm typecheck`/`lint`/`build`/`test`/`test:tenant` verts sans
+> régression (aucun code applicatif touché par cette phase, uniquement
+> `docs/` et `scripts/`).
+>
+> Reste pour la suite de la Phase 10 : sauvegardes testées par restauration
+> réelle (10.4), logs structurés + `/health` (10.5), reverse proxy
+> Caddy/HTTPS + `docs/deployment/PRODUCTION.md` (10.6).
+
 ---
 
 ## E. LES 5 TESTS QUI CONDITIONNENT LA LIVRAISON
