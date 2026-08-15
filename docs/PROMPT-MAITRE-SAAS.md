@@ -831,6 +831,43 @@ Docker/packaging.
 > réelle (10.4), logs structurés + `/health` (10.5), reverse proxy
 > Caddy/HTTPS + `docs/deployment/PRODUCTION.md` (10.6).
 
+> Réalisé (2026-08-15, Phase 10.4 — Sauvegardes et restauration) :
+> `scripts/db-backup.sh` (`pg_dump -Fc`, rétention configurable, `chmod 600`
+> — mêmes conventions que `scripts/prod-post-deploy.sh` : source
+> `docker/.env.prod`, cible `docker-compose.prod.yml`) et
+> `scripts/db-restore.sh` (`pg_restore --clean --if-exists`, confirmation
+> explicite `--yes` obligatoire — opération destructive). `docs/deployment/
+> BACKUPS.md` documente ce qui est sauvegardé (tout sauf le rôle
+> `erp_app_tenant`, objet de cluster hors dump par base, déjà recréé de
+> façon idempotente par la migration `20260809113836_...`), la fréquence/
+> rétention recommandées (cron quotidien, non installé — aucun VPS réel),
+> et les deux scénarios de restauration (incident sur cluster en place vs
+> sinistre sur infrastructure neuve, ce second cas nécessitant
+> `prod-post-deploy.sh` avant `db-restore.sh` pour recréer le rôle). Écart
+> assumé : pas de copie hors-hôte des sauvegardes à ce commit (aucune cible
+> de stockage distant choisie) — un VPS qui perd son disque perd aussi ses
+> sauvegardes locales, documenté explicitement comme non couvert.
+>
+> **Vérifié de bout en bout sur la stack prod réelle** (`docker-compose.prod.yml`,
+> secrets jetables dans un `docker/.env.prod` temporaire, jamais commité) :
+> migrations + rotation du rôle tenant appliquées, deux entreprises + deux
+> utilisateurs insérés, sauvegarde réelle prise (116 Ko), **sinistre simulé**
+> (`TRUNCATE ... CASCADE` sur 29 tables), restauration exécutée, puis
+> confirmé après coup : les données sont revenues intactes et correctement
+> liées, la policy RLS `FORCE ROW LEVEL SECURITY` fonctionne toujours
+> (isolation tenant A/B vérifiée, et **zéro ligne visible sans
+> `TenantContext`** — pas juste "aucune erreur"), et le rôle
+> `erp_app_tenant` avec son mot de passe rotationné *avant* la sauvegarde
+> a survécu intact à `pg_restore --clean` (confirme qu'un objet de cluster
+> n'est jamais affecté par une restauration limitée à une base). Stack
+> éteinte proprement (`down -v`), `.env.prod` et dumps de test supprimés.
+> `pnpm typecheck`/`lint`/`test`/`test:tenant`/`build` verts sans
+> régression (cette phase ne touche que `docs/`, `scripts/` et
+> `.gitignore`, aucun code applicatif).
+>
+> Reste pour la suite de la Phase 10 : logs structurés + `/health` (10.5),
+> reverse proxy Caddy/HTTPS + `docs/deployment/PRODUCTION.md` (10.6).
+
 ---
 
 ## E. LES 5 TESTS QUI CONDITIONNENT LA LIVRAISON
