@@ -53,7 +53,10 @@ echo "==> Purge des sauvegardes au-delà des $BACKUP_RETENTION_COUNT plus récen
 ls -1t "$BACKUP_DIR"/erp_saas_*.dump 2>/dev/null | tail -n "+$((BACKUP_RETENTION_COUNT + 1))" | \
   while IFS= read -r old; do
     echo "    suppression : $old"
-    rm -f -- "$old"
+    # Marqueur laissé par scripts/backup-offsite-sync.sh (Phase 10.4+) : la
+    # copie hors-hôte, elle, reste sur le stockage distant — seul le
+    # marqueur local (0 octet) est nettoyé ici.
+    rm -f -- "$old" "${old}.uploaded"
   done
 
 echo "==> $(ls -1 "$BACKUP_DIR"/erp_saas_*.dump 2>/dev/null | wc -l) sauvegarde(s) conservée(s) dans $BACKUP_DIR."

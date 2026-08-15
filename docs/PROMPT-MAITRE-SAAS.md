@@ -956,6 +956,35 @@ Docker/packaging.
 > avant le premier `git push` (fait depuis, avec accord explicite de
 > l'utilisateur) ; le statut du premier run réel reste à confirmer.
 
+> Réalisé (2026-08-15, comble l'écart assumé en Phase 10.4 — copie
+> hors-hôte des sauvegardes) : `scripts/backup-offsite-sync.sh` (chiffre
+> chaque dump non encore envoyé avec `age`, clé **publique** seulement sur
+> le VPS — la clé privée n'y réside jamais — puis l'envoie via `rclone` vers
+> un stockage S3-compatible, sans fournisseur imposé) et
+> `scripts/backup-offsite-fetch.sh` (télécharge + déchiffre, nécessite la
+> clé privée fournie séparément, jamais depuis un usage courant sur le VPS).
+> Outils choisis et alternatives écartées documentées dans
+> `docs/deployment/BACKUPS.md` (`age`+`rclone`, pas de dépendance npm — des
+> outils d'exploitation VPS). `rclone` configuré par variables
+> d'environnement (`RCLONE_CONFIG_ERPOFFSITE_*`), pas par `rclone config`
+> interactif.
+>
+> **Vérifié de bout en bout** avec un MinIO jetable (S3-compatible
+> auto-hébergé, jamais utilisé en production) comme cible, même limite que
+> Caddy/Let's Encrypt (10.6) : aucun compte S3 réel disponible ici. Cycle
+> complet réel : chiffrement + envoi confirmé sur le bucket, rejoué une
+> seconde fois pour confirmer l'idempotence (aucun double envoi), **perte
+> totale de l'hôte simulée** (répertoire de sauvegarde local supprimé),
+> téléchargement + déchiffrement réussi, empreinte SHA-256 du fichier
+> restauré **identique bit à bit** à l'original. Un bug réel trouvé et
+> corrigé pendant cette vérification : la syntaxe `rclone` "remote en
+> ligne" casse dès qu'un paramètre contient un `:` (le cas de tout
+> `S3_ENDPOINT` réel, ex. `https://s3.exemple.com`) — remplacée par la
+> configuration par variables d'environnement, qui n'a pas ce problème.
+> `pnpm typecheck`/`lint`/`test`/`test:tenant`/`build` verts sans régression
+> (cette phase ne touche que `scripts/`, `docker/.env.prod.example` et
+> `docs/deployment/`, aucun code applicatif).
+
 ---
 
 ## E. LES 5 TESTS QUI CONDITIONNENT LA LIVRAISON

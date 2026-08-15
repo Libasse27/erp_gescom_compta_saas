@@ -102,8 +102,10 @@ stratégie de rollback (résolution d'échec via
 ## Sauvegardes
 
 `docs/deployment/BACKUPS.md` — `scripts/db-backup.sh`/`scripts/db-restore.sh`,
-vérifiés par une restauration réelle. Cron quotidien recommandé, à installer
-une fois le VPS provisionné (ligne crontab documentée dans ce fichier).
+vérifiés par une restauration réelle, et copie hors-hôte chiffrée
+(`scripts/backup-offsite-sync.sh`/`backup-offsite-fetch.sh`, `age` + `rclone`
+vers un stockage S3-compatible). Cron quotidien recommandé, à installer une
+fois le VPS provisionné (ligne crontab documentée dans ce fichier).
 
 ## Logs et santé
 

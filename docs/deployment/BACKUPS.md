@@ -33,12 +33,90 @@ d'une sauvegarde par jour). Chaque dump est écrit avec `chmod 600`
 (contient des données personnelles et financières réelles — NINEA/RCCM,
 montants, emails).
 
-**Non couvert à ce commit** : copie hors-hôte (objet distant type S3, ou
-`rsync` vers un second serveur). Une sauvegarde qui ne vit que sur le VPS
-qu'elle est censée protéger ne survit pas à la perte de ce VPS. À traiter
-dès qu'une cible de stockage distant est choisie — chiffrement (`age` ou
-`gpg`) recommandé avant tout transfert hors-hôte, le dump n'étant pas
-chiffré par lui-même.
+## Copie hors-hôte (comble l'écart initialement assumé ci-dessus)
+
+Une sauvegarde qui ne vit que sur le VPS qu'elle est censée protéger ne
+survit pas à la perte de ce VPS. `scripts/backup-offsite-sync.sh` — à
+enchaîner juste après `db-backup.sh` dans le même cron :
+
+```cron
+0 3 * * * cd /opt/erp_saas && BACKUP_DIR=/var/backups/erp_saas ./scripts/db-backup.sh >> /var/log/erp_saas/backup.log 2>&1 && ./scripts/backup-offsite-sync.sh >> /var/log/erp_saas/backup.log 2>&1
+```
+
+**Outils** : `age` (chiffrement moderne, une clé publique/privée X25519,
+alternative plus simple que GPG — pas de trousseau à gérer) et `rclone`
+(client S3-compatible, un seul binaire statique, standard de fait pour ce
+type de synchronisation). Aucun des deux n'est un paquet npm du projet —
+ce sont des outils d'exploitation à installer sur le VPS
+(`apt install age rclone` sur Debian/Ubuntu, `apk add age rclone` sur
+Alpine, ou binaires officiels). Écartés : AWS CLI (dépendance Python plus
+lourde, spécifique à la syntaxe AWS) et le chiffrement natif de `rclone`
+(`rclone crypt`) qui aurait mélangé transport et chiffrement dans un seul
+outil/config plutôt que deux responsabilités séparées.
+
+**Chiffrement asymétrique, clé privée jamais sur le VPS** : `docker/.env.prod`
+ne contient que `BACKUP_AGE_RECIPIENT`, la clé **publique** age (générée une
+fois, hors du VPS, via `age-keygen -o cle.txt` — la ligne `# public key:
+age1...` de la sortie). La clé privée reste hors du VPS (poste de
+l'opérateur, coffre-fort de secrets) : même si le VPS est compromis,
+l'attaquant ne peut déchiffrer ni les sauvegardes déjà envoyées ni les
+futures — il peut seulement en chiffrer de nouvelles avec la clé publique,
+ce qui ne lui donne accès à rien.
+
+**Stockage** : n'importe quel fournisseur S3-compatible (Scaleway, OVH,
+Backblaze B2...) — pas de fournisseur imposé, `S3_ENDPOINT`/`S3_BUCKET`/
+`S3_REGION`/`S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` dans
+`docker/.env.prod`. `rclone` est configuré par variables d'environnement
+(`RCLONE_CONFIG_ERPOFFSITE_*`), pas par `rclone config` interactif — un
+souci de plus en moins à refaire à chaque nouvel hôte, et cohérent avec le
+reste de ce dépôt (tout piloté par `docker/.env.prod`).
+
+Idempotent : chaque dump synchronisé reçoit un marqueur local
+(`<dump>.uploaded`, 0 octet) — un dump déjà marqué n'est jamais rechiffré
+ni renvoyé, donc rejouable sans double envoi. `db-backup.sh` nettoie le
+marqueur en même temps que le dump quand la rétention locale purge un
+fichier ancien (la copie distante, elle, reste sur le stockage S3).
+
+### Restauration depuis la copie hors-hôte
+
+`scripts/backup-offsite-fetch.sh <nom_du_fichier.dump.age> <répertoire_de_sortie>`
+télécharge et déchiffre — nécessite `AGE_IDENTITY_FILE` (chemin vers la clé
+**privée**, fournie séparément, jamais dans `docker/.env.prod`). À exécuter
+depuis le poste de l'opérateur ou temporairement sur le VPS de remplacement
+lors d'un sinistre réel — jamais en usage courant sur un VPS de production
+(la clé privée n'y a rien à faire). Puis `scripts/db-restore.sh
+<fichier déchiffré> --yes` comme d'habitude (scénario B ci-dessus si
+l'infrastructure est neuve).
+
+### Vérifié de bout en bout (stockage S3 réel simulé, pas de compte cloud dans cet environnement)
+
+Même limite que Caddy/Let's Encrypt (Phase 10.6) : aucun compte S3 réel
+disponible ici. Vérifié malgré tout avec un MinIO jetable (serveur
+S3-compatible auto-hébergé, dans un conteneur Docker séparé, jamais utilisé
+en production) comme cible — exerce exactement le même chemin de code
+`age`/`rclone` qu'un vrai fournisseur, seuls `S3_ENDPOINT`/les identifiants
+diffèrent :
+
+1. Fichier de sauvegarde factice créé, empreinte SHA-256 calculée.
+2. `scripts/backup-offsite-sync.sh` exécuté → chiffrement `age` réussi,
+   objet effectivement présent sur le bucket MinIO (confirmé par
+   `rclone lsf`), marqueur local créé.
+3. Rejoué une seconde fois → `0 sauvegarde(s) nouvellement synchronisée(s)`,
+   confirme l'idempotence (pas de double chiffrement/envoi).
+4. **Perte totale de l'hôte simulée** : répertoire de sauvegarde local
+   supprimé entièrement.
+5. `scripts/backup-offsite-fetch.sh` exécuté avec la clé privée générée à
+   l'étape 1 → fichier téléchargé et déchiffré.
+6. Empreinte SHA-256 du fichier restauré comparée à l'originale : **identique
+   bit à bit**.
+
+Un bug réel a été trouvé et corrigé pendant cette vérification (pas
+seulement une syntaxe qui "a l'air" correcte) : la syntaxe `rclone`
+"remote en ligne" (`:s3,endpoint=...,...:bucket`) casse dès qu'un paramètre
+contient lui-même un `:` — le cas de tout `S3_ENDPOINT` réel
+(`https://s3.exemple.com`). Remplacée par la configuration via variables
+d'environnement `RCLONE_CONFIG_ERPOFFSITE_*` (ci-dessus), qui n'a pas ce
+problème.
 
 ## Restauration — deux scénarios
 
