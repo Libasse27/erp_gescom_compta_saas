@@ -7,7 +7,9 @@ import { AuditLogModule } from "./common/audit/audit-log.module";
 import { AuthModule } from "./auth/auth.module";
 import { CustomersModule } from "./customers/customers.module";
 import { EntitlementsModule } from "./entitlements/entitlements.module";
+import { HealthModule } from "./health/health.module";
 import { InvoicingModule } from "./invoicing/invoicing.module";
+import { LoggingModule } from "./common/logging/logging.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { OnboardingModule } from "./onboarding/onboarding.module";
 import { PaymentsModule } from "./payments/payments.module";
@@ -27,12 +29,16 @@ import { TenantModule } from "./tenant/tenant.module";
 import { TenantContextMiddleware } from "./tenant/tenant-context.middleware";
 import { UsersModule } from "./users/users.module";
 import { GLOBAL_RATE_LIMIT } from "./common/rate-limit";
+import { RequestContextMiddleware } from "./common/logging/request-context.middleware";
+import { HttpLoggingMiddleware } from "./common/logging/http-logging.middleware";
 
 @Module({
   imports: [
     // Limite globale par défaut ; /auth/* applique une limite plus stricte
     // via @Throttle (CLAUDE.md §6).
     ThrottlerModule.forRoot([GLOBAL_RATE_LIMIT]),
+    LoggingModule,
+    HealthModule,
     PrismaModule,
     AuditLogModule,
     NotificationsModule,
@@ -62,7 +68,17 @@ import { GLOBAL_RATE_LIMIT } from "./common/rate-limit";
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    // Doit s'exécuter avant tous les guards (voir tenant-context.middleware.ts).
+    // Ordre significatif (Phase 10.5, docs/deployment/LOGGING.md) :
+    // 1. RequestContextMiddleware — englobe TOUTE la requête (y compris les
+    //    routes publiques) dans son AsyncLocalStorage, doit donc être le
+    //    premier maillon de la chaîne.
+    // 2. TenantContextMiddleware — doit s'exécuter avant tous les guards
+    //    (voir tenant-context.middleware.ts).
+    // 3. HttpLoggingMiddleware — enregistre son listener 'finish' en
+    //    dernier pour hériter des deux contextes ci-dessus au moment où il
+    //    se déclenche (fin de la requête).
+    consumer.apply(RequestContextMiddleware).forRoutes("*");
     consumer.apply(TenantContextMiddleware).forRoutes("*");
+    consumer.apply(HttpLoggingMiddleware).forRoutes("*");
   }
 }

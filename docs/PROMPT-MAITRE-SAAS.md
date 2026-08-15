@@ -868,6 +868,53 @@ Docker/packaging.
 > Reste pour la suite de la Phase 10 : logs structurés + `/health` (10.5),
 > reverse proxy Caddy/HTTPS + `docs/deployment/PRODUCTION.md` (10.6).
 
+> Réalisé (2026-08-15, Phase 10.5 — Logs structurés + `/health`) :
+> `StructuredLoggerService` (`apps/api/src/common/logging/`) implémente
+> `LoggerService` de Nest — une ligne JSON par événement, aucune nouvelle
+> dépendance (justification explicite dans `docs/deployment/LOGGING.md`,
+> CLAUDE.md §3 : `console.log`/`console.error` suffisent, Docker capture déjà
+> stdout/stderr). Corrélation via deux `AsyncLocalStorage` distincts, lus au
+> moment d'écrire chaque ligne : `RequestContext` (nouveau, `requestId` sur
+> **toute** requête y compris publique, réutilise `X-Request-Id` entrant
+> sinon en génère un) et `TenantContext` (existant depuis la Phase 3,
+> inchangé). Ordre des trois middlewares dans `app.module.ts` — significatif
+> et documenté (`RequestContextMiddleware` → `TenantContextMiddleware` →
+> `HttpLoggingMiddleware`, ce dernier doit être en dernier pour hériter des
+> deux contextes au moment où son listener `finish` se déclenche).
+> `GET /health` (`apps/api/src/health/`) hors préfixe `/v1` (comme les
+> webhooks de paiement) : vérifie une vraie connectivité Postgres
+> (`SELECT 1`), répond `503` (pas `200` inconditionnel) si la base est
+> injoignable. `docker-compose.prod.yml` (service `api`) déclare un
+> `healthcheck` dessus, via `node -e` (pas de nouveau paquet — Alpine
+> minimal n'a ni curl ni wget).
+>
+> **Vérifié au-delà des tests** : suite complète (`structured-logger.service.spec.ts`,
+> `health.controller.spec.ts`, `health.integration.spec.ts`,
+> `logging.integration.spec.ts`, 17 tests) verte, dont une preuve de bout en
+> bout que l'assemblage des trois middlewares fonctionne réellement dans le
+> bon ordre (requête authentifiée réelle via `/auth/login` puis
+> `GET /customers` → ligne de log HTTP dont `tenantId`/`userId` correspondent
+> exactement à l'entreprise/l'utilisateur du test, capturé en interceptant
+> `console.log`, pas en inspectant le code). **Sur la stack Docker prod
+> réelle** (image `api` reconstruite avec le nouveau code, secrets jetables) :
+> le healthcheck Docker est passé à `healthy`, les logs du conteneur sont du
+> JSON valide de bout en bout (bootstrap Nest inclus), `GET /health` répond
+> `200 {status:"ok",database:"ok",...}` avec Postgres up, puis **Postgres
+> arrêté en direct** → `GET /health` répond bien `503
+> {status:"error",database:"error"}` (pas un `200` qui mentirait), Postgres
+> relancé, stack éteinte proprement (`down -v`), `.env.prod` supprimé.
+> `pnpm typecheck`/`lint`/`test` (58 suites api + reste du monorepo)/
+> `test:tenant` (10/10)/`build` (11/11) verts sans régression.
+>
+> Écarts assumés (documentés dans `docs/deployment/LOGGING.md`) : pas
+> d'agrégateur de logs branché (Loki/CloudWatch...) — aucun VPS réel où le
+> configurer, même limite que la CD (10.2) et la copie hors-hôte des
+> sauvegardes (10.4) ; pas de healthcheck Docker pour `apps/web` à ce commit
+> (scope limité à l'API, qui porte la connexion Postgres).
+>
+> Reste pour la suite de la Phase 10 : reverse proxy Caddy/HTTPS +
+> `docs/deployment/PRODUCTION.md` (10.6).
+
 ---
 
 ## E. LES 5 TESTS QUI CONDITIONNENT LA LIVRAISON

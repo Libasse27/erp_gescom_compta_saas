@@ -35,4 +35,8 @@ export const env = {
       .split(",")
       .map((origin) => origin.trim())
       .filter(Boolean),
+  // Niveau minimal écrit par StructuredLoggerService (Phase 10.5, voir
+  // docs/deployment/LOGGING.md). "log" par défaut : masque debug/verbose en
+  // production sans configuration supplémentaire.
+  logLevel: () => process.env.LOG_LEVEL ?? "log",
 };

@@ -48,6 +48,10 @@ module.exports = tseslint.config(
       // Catalogue plateforme public (Plan), pas tenant-scoped — comme
       // `permissions`, accessible avant toute authentification.
       "src/plans/plans.service.ts",
+      // Sonde d'infra (Phase 10.5) : vérifie la connectivité brute à
+      // Postgres, par construction hors de tout TenantContext (même
+      // catégorie qu'AuthService/ProvisioningService, docs/adr/0008-...).
+      "src/health/**",
       "**/*.spec.ts",
     ],
     rules: {
