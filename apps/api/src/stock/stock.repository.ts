@@ -30,9 +30,12 @@ export interface StockMovementListResult {
   pageSize: number;
 }
 
+// `created: false` signale un rejeu déduplié (docs/adr/0019-...) — même
+// patron que CreateSaleResult.
 export interface CreateMovementResult {
   movement: StockMovement;
   quantityOnHand: number;
+  created: boolean;
 }
 
 // Seul point d'accès Prisma pour StockMovement (CLAUDE.md §5/§8). Contrairement
@@ -133,10 +136,14 @@ export class StockRepository {
   // passer un stock négatif. Postgres fait échouer l'une des deux
   // transactions en conflit (erreur 40001 / Prisma P2034), rattrapée
   // ci-dessous en 409.
-  async createMovement(enterpriseId: string, input: CreateStockMovementInput): Promise<CreateMovementResult> {
+  async createMovement(
+    enterpriseId: string,
+    input: CreateStockMovementInput,
+    idempotencyKey?: string,
+  ): Promise<CreateMovementResult> {
     try {
       return await this.tenantPrisma.run(
-        (tx) => this.applyMovement(tx, enterpriseId, input),
+        (tx) => this.applyMovement(tx, enterpriseId, input, idempotencyKey),
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
     } catch (error) {
@@ -158,7 +165,22 @@ export class StockRepository {
     tx: Prisma.TransactionClient,
     enterpriseId: string,
     input: CreateStockMovementInput,
+    idempotencyKey?: string,
   ): Promise<CreateMovementResult> {
+    // Corrige ERP-AUDIT-001 (docs/adr/0019-...) : un rejeu de la file
+    // hors-ligne mobile (réponse perdue après un succès serveur) ne doit
+    // jamais créer un second mouvement. Uniquement pertinent pour
+    // POST /stock/movements (StockController.createMovement) : les appels
+    // composés depuis SalesRepository.confirm()/PurchasesRepository.confirm()
+    // ne passent jamais de clé, déjà protégés par leur propre machine à états.
+    if (idempotencyKey) {
+      const existing = await tx.stockMovement.findFirst({ where: { enterpriseId, idempotencyKey } });
+      if (existing) {
+        const quantities = await this.aggregateQuantities(tx, enterpriseId, [existing.productId]);
+        return { movement: existing, quantityOnHand: quantities.get(existing.productId) ?? 0, created: false };
+      }
+    }
+
     const product = await tx.product.findUnique({ where: { id: input.productId } });
     if (!product || product.enterpriseId !== enterpriseId) {
       throw new NotFoundException("Produit introuvable");
@@ -176,17 +198,34 @@ export class StockRepository {
       throw new ConflictException("Stock insuffisant");
     }
 
-    const movement = await tx.stockMovement.create({
-      data: {
-        enterpriseId,
-        productId: input.productId,
-        type: input.type,
-        quantity: input.quantity,
-        note: input.note,
-      },
-    });
+    try {
+      const movement = await tx.stockMovement.create({
+        data: {
+          enterpriseId,
+          productId: input.productId,
+          type: input.type,
+          quantity: input.quantity,
+          note: input.note,
+          idempotencyKey: idempotencyKey ?? null,
+        },
+      });
 
-    return { movement, quantityOnHand: nextQuantity };
+      return { movement, quantityOnHand: nextQuantity, created: true };
+    } catch (error) {
+      // Filet de concurrence, même patron que SalesRepository.create.
+      if (idempotencyKey && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        const existing = await tx.stockMovement.findFirst({ where: { enterpriseId, idempotencyKey } });
+        if (existing) {
+          const existingQuantities = await this.aggregateQuantities(tx, enterpriseId, [existing.productId]);
+          return {
+            movement: existing,
+            quantityOnHand: existingQuantities.get(existing.productId) ?? 0,
+            created: false,
+          };
+        }
+      }
+      throw error;
+    }
   }
 
   private async findTrackedProductOrThrow(tx: Prisma.TransactionClient, enterpriseId: string, productId: string) {

@@ -38,19 +38,23 @@ export class StockService {
     userId: string,
     input: CreateStockMovementInput,
     meta: RequestMetadata,
+    idempotencyKey?: string,
   ): Promise<CreateMovementResult> {
-    const result = await this.stockRepository.createMovement(enterpriseId, input);
+    const result = await this.stockRepository.createMovement(enterpriseId, input, idempotencyKey);
 
-    await this.auditLog.record({
-      userId,
-      enterpriseId,
-      action: "CREATE_STOCK_MOVEMENT",
-      resource: "StockMovement",
-      resourceId: result.movement.id,
-      ipAddress: meta.ipAddress,
-      userAgent: meta.userAgent,
-      metadata: { productId: input.productId, type: input.type, quantity: input.quantity },
-    });
+    // Un rejeu dédupliqué (docs/adr/0019-...) n'a produit aucune écriture.
+    if (result.created) {
+      await this.auditLog.record({
+        userId,
+        enterpriseId,
+        action: "CREATE_STOCK_MOVEMENT",
+        resource: "StockMovement",
+        resourceId: result.movement.id,
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+        metadata: { productId: input.productId, type: input.type, quantity: input.quantity },
+      });
+    }
 
     return result;
   }

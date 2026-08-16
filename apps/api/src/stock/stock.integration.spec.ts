@@ -148,6 +148,39 @@ describe("StockController (integration)", () => {
     expect(movementsRes.body.total).toBe(2);
   });
 
+  // Régression ERP-AUDIT-001 (docs/audit/ERP-AUDIT.md, docs/adr/0019-...) —
+  // même patron que sales.integration.spec.ts.
+  it("returns the same movement on a replayed POST /stock/movements carrying the same Idempotency-Key header", async () => {
+    const { accessToken, enterpriseId } = await setupTenant(["stock.read", "stock.create"]);
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const product = await createProduct(enterpriseId);
+    const idempotencyKey = randomUUID();
+    const body = { productId: product.id, type: "IN", quantity: 50 };
+
+    const firstRes = await request(app.getHttpServer())
+      .post("/stock/movements")
+      .set(auth)
+      .set("Idempotency-Key", idempotencyKey)
+      .send(body)
+      .expect(201);
+
+    const secondRes = await request(app.getHttpServer())
+      .post("/stock/movements")
+      .set(auth)
+      .set("Idempotency-Key", idempotencyKey)
+      .send(body)
+      .expect(201);
+
+    expect(secondRes.body.movement.id).toBe(firstRes.body.movement.id);
+    expect(secondRes.body.quantityOnHand).toBe(50);
+
+    const movementsRes = await request(app.getHttpServer())
+      .get(`/stock/${product.id}/movements`)
+      .set(auth)
+      .expect(200);
+    expect(movementsRes.body.total).toBe(1);
+  });
+
   it("rejects invalid input (400): non-positive quantity for IN, zero for ADJUSTMENT", async () => {
     const { accessToken, enterpriseId } = await setupTenant(["stock.create"]);
     const auth = { Authorization: `Bearer ${accessToken}` };

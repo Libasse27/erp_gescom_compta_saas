@@ -136,6 +136,53 @@ describe("StockRepository", () => {
     });
   });
 
+  // Régression ERP-AUDIT-001 (docs/audit/ERP-AUDIT.md, docs/adr/0019-...) :
+  // un rejeu de la file hors-ligne mobile (réponse perdue après un succès
+  // serveur) ne doit jamais créer un second mouvement pour un seul
+  // événement logique.
+  it("returns the same movement without creating a duplicate when the same idempotency key is replayed", async () => {
+    const enterprise = await createEnterprise();
+    const product = await createTrackedProduct(enterprise.id);
+    const key = randomUUID();
+
+    await asTenant(enterprise.id, async () => {
+      const first = await repository.createMovement(enterprise.id, { productId: product.id, type: "IN", quantity: 10 }, key);
+      const second = await repository.createMovement(enterprise.id, { productId: product.id, type: "IN", quantity: 10 }, key);
+
+      expect(first.created).toBe(true);
+      expect(second.created).toBe(false);
+      expect(second.movement.id).toBe(first.movement.id);
+      expect(second.quantityOnHand).toBe(10); // pas 20 : un seul mouvement réellement inséré
+
+      const movements = await prisma.stockMovement.findMany({ where: { enterpriseId: enterprise.id } });
+      expect(movements).toHaveLength(1);
+    });
+  });
+
+  it("creates two distinct movements when the idempotency key differs", async () => {
+    const enterprise = await createEnterprise();
+    const product = await createTrackedProduct(enterprise.id);
+
+    await asTenant(enterprise.id, async () => {
+      const first = await repository.createMovement(
+        enterprise.id,
+        { productId: product.id, type: "IN", quantity: 10 },
+        randomUUID(),
+      );
+      const second = await repository.createMovement(
+        enterprise.id,
+        { productId: product.id, type: "IN", quantity: 10 },
+        randomUUID(),
+      );
+
+      expect(first.movement.id).not.toBe(second.movement.id);
+      expect(second.quantityOnHand).toBe(20);
+
+      const movements = await prisma.stockMovement.findMany({ where: { enterpriseId: enterprise.id } });
+      expect(movements).toHaveLength(2);
+    });
+  });
+
   it("only counts products with trackStock=true in the paginated stock level list", async () => {
     const enterprise = await createEnterprise();
     const tracked = await createTrackedProduct(enterprise.id);

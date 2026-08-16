@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
@@ -78,7 +79,9 @@ export class StockController {
     @Body(new ZodValidationPipe(createStockMovementSchema)) body: CreateStockMovementInput,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
+    // Corrige ERP-AUDIT-001 (docs/adr/0019-...).
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
-    return this.stockService.createMovement(user.enterpriseId as string, user.id, body, requestMeta(req));
+    return this.stockService.createMovement(user.enterpriseId as string, user.id, body, requestMeta(req), idempotencyKey);
   }
 }

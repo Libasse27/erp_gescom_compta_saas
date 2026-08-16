@@ -606,8 +606,16 @@ model StockMovement {
   quantity Int
   note     String?
 
+  // Corrige ERP-AUDIT-001 (docs/audit/ERP-AUDIT.md, docs/adr/0019-...) —
+  // même patron que Sale.idempotencyKey. POST /stock/movements est une
+  // création pure (comme POST /sales), pas une transition d'état protégée
+  // par une machine à états — un rejeu réseau y créerait un second
+  // mouvement pour un seul événement logique.
+  idempotencyKey String? @map("idempotency_key")
+
   createdAt DateTime @default(now()) @map("created_at")
 
+  @@unique([enterpriseId, idempotencyKey])
   @@index([enterpriseId, productId])
   @@index([enterpriseId, createdAt])
   @@map("stock_movements")
