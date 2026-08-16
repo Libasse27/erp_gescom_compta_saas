@@ -12,8 +12,16 @@ import { TokenService } from "./token.service";
 
 @Module({
   imports: [
+    // algorithms épinglé (corrige SEC-01, docs/audit/SECURITY-AUDIT.md) :
+    // empêche qu'un jeton signé avec un autre algorithme (ex. "none") soit
+    // accepté. issuer/audience/typ sont vérifiés en plus, par appel, dans
+    // token.service.ts.
     JwtModule.registerAsync({
-      useFactory: () => ({ secret: env.jwtAccessSecret() }),
+      useFactory: () => ({
+        secret: env.jwtAccessSecret(),
+        signOptions: { algorithm: "HS256" },
+        verifyOptions: { algorithms: ["HS256"] },
+      }),
     }),
   ],
   controllers: [AuthController],

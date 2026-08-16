@@ -76,7 +76,12 @@ secrets par les journaux.
   chaque `verify`. Test de non-régression : « un jeton de défi MFA présenté en `Bearer` sur
   `GET /v1/auth/me` renvoie 401 ».
 - **Priorité** : P1
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-16) — `typ: "access"` émis et vérifié dans
+  `TokenService.verifyAccessToken`, `algorithms: ["HS256"]`/`issuer`/`audience`
+  épinglés dans `AuthModule` (`JwtModule.registerAsync`) et sur chaque
+  `sign`/`verify` de `token.service.ts`. Test de non-régression ajouté :
+  `auth-mfa.integration.spec.ts` → « rejects an MFA challenge token presented
+  as a Bearer access token ».
 
 ### SEC-02
 
@@ -117,7 +122,12 @@ secrets par les journaux.
   Étendre le test existant sur `erp_app_tenant` (`tenant-isolation.tenant.spec.ts:200-213`) au
   rôle d'identité.
 - **Priorité** : P1
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-16) — doublon de MT-01 (`docs/audit/MULTI-TENANT-AUDIT.md`).
+  Rôle `erp_app_identity` créé (`NOSUPERUSER`, non propriétaire) — `BYPASSRLS`
+  plutôt que `NOBYPASSRLS` par rapport à la solution suggérée ici, choix
+  documenté et justifié dans `docs/adr/0018-role-identite-bypassrls-non-superuser.md`
+  (nécessaire pour les flux pré-tenant, reste soumis aux `GRANT` table par
+  table). `PrismaService` se connecte désormais via `IDENTITY_DATABASE_URL`.
 
 ### SEC-03
 
@@ -149,7 +159,11 @@ secrets par les journaux.
   « un utilisateur SUSPENDED reçoit 401 sur `/auth/login` » et « le refresh d'un utilisateur d'une
   entreprise SUSPENDED reçoit 401 ».
 - **Priorité** : P1
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-16) — `login`/`refresh` rejettent désormais un
+  `User.status`/`Enterprise.status` non `ACTIVE` avec le message générique,
+  révocation de toute la famille de refresh tokens au refresh. Action d'audit
+  dédiée `REFRESH_REJECTED_INACTIVE_ACCOUNT`. Tests ajoutés dans
+  `auth.integration.spec.ts`.
 
 ### SEC-04
 
@@ -178,7 +192,13 @@ secrets par les journaux.
   attendant l'intégration SMTP, ne jamais journaliser le corps : n'émettre que
   `to`/`subject`/identifiant de message. Test : « `ConsoleMailSender` n'écrit jamais `body` ».
 - **Priorité** : P1
-- **Statut** : OUVERT
+- **Statut** : PARTIELLEMENT CORRIGÉ (2026-08-16) — `ConsoleMailSender` n'écrit
+  plus jamais `body` (identifiant de message généré à la place), test ajouté
+  (`mail-sender.spec.ts`). Écart restant assumé : pas de fail-closed au
+  démarrage — `main.ts` émet un avertissement fort en production tant que
+  l'intégration SMTP réelle (Phase 24) n'existe pas, un fail-closed strict
+  casserait le seul chemin de déploiement documenté sans offrir
+  d'alternative. À revisiter quand un expéditeur réel existera.
 
 ### SEC-05
 

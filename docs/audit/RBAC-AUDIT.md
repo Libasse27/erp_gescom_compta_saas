@@ -89,7 +89,10 @@ Catalogue de permissions : 37 clés typées dans `packages/permissions/src/permi
   explicite `@NoPermissionRequired()` justifié par écrit. Test de non-régression : une route de
   test placée sous `PermissionsGuard` sans `@RequirePermission` doit renvoyer 403.
 - **Priorité** : P1
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-16) — `PermissionsGuard` utilise
+  `getAllAndOverride` et lève `ForbiddenException` par défaut sauf
+  `@RequirePermission` ou `@NoPermissionRequired()` explicite. Tests ajoutés
+  (`permissions.guard.spec.ts`).
 
 ### RBAC-02
 

@@ -104,7 +104,16 @@ donnée tenant.
   hors RLS est `CrossTenantRepository`, et il devrait alors disposer de sa propre connexion,
   distincte et auditée.
 - **Priorité** : P1
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-16) — rôle `erp_app_identity` créé
+  (`NOSUPERUSER`, non propriétaire) — `BYPASSRLS` plutôt que `NOBYPASSRLS`
+  par rapport à la solution suggérée ici, choix documenté et justifié dans
+  `docs/adr/0018-role-identite-bypassrls-non-superuser.md` (nécessaire pour
+  les flux pré-tenant, reste soumis aux `GRANT` table par table). Périmètre
+  de `GRANT` vérifié contre l'usage réel (migration
+  `20260816120000_add_identity_role`), y compris les six consommateurs
+  identifiés ici comme non couverts par l'ADR-0008 d'origine. `CrossTenantRepository`
+  n'a pas de connexion séparée à ce stade — écart restant, à traiter
+  séparément (voir `docs/adr/0018` §Conséquences).
 
 ### MT-02
 

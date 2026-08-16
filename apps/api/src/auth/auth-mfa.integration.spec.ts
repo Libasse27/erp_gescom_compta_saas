@@ -133,4 +133,21 @@ describe("Auth MFA (integration)", () => {
       .send({ challengeToken: firstLogin.body.challengeToken, code: secondCode })
       .expect(401);
   });
+
+  // Régression SEC-01 (docs/audit/SECURITY-AUDIT.md) : un jeton de défi MFA,
+  // obtenu avec le seul mot de passe (avant tout second facteur), ne doit
+  // jamais franchir JwtAuthGuard comme un jeton de session.
+  it("rejects an MFA challenge token presented as a Bearer access token", async () => {
+    const { user, plainPassword } = await createSuperAdmin();
+
+    const loginRes = await request(app.getHttpServer())
+      .post("/auth/login")
+      .send({ email: user.email, password: plainPassword })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get("/auth/me")
+      .set("Authorization", `Bearer ${loginRes.body.challengeToken}`)
+      .expect(401);
+  });
 });
