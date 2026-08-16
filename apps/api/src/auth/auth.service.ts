@@ -36,7 +36,7 @@ export class AuthService {
   ) {}
 
   async login(email: string, password: string, meta: RequestMetadata): Promise<LoginResult> {
-    const user = await this.prisma.user.findUnique({ where: { email } });
+    const user = await this.prisma.user.findUnique({ where: { email }, include: { enterprise: true } });
 
     if (!user) {
       await this.auditLog.record({
@@ -59,6 +59,24 @@ export class AuthService {
         ipAddress: meta.ipAddress,
         userAgent: meta.userAgent,
         metadata: { reason: "locked" },
+      });
+      throw new UnauthorizedException(GENERIC_LOGIN_ERROR);
+    }
+
+    // Corrige SEC-03 (docs/audit/SECURITY-AUDIT.md) : un compte ou une
+    // entreprise non actifs ne doivent jamais obtenir de nouvelle session.
+    // Message générique (pas de distinction PENDING_INVITE/SUSPENDED, ni
+    // compte/entreprise) pour ne pas prêter à l'énumération (CLAUDE.md §6).
+    if (user.status !== "ACTIVE" || (user.enterprise && user.enterprise.status !== "ACTIVE")) {
+      await this.auditLog.record({
+        userId: user.id,
+        enterpriseId: user.enterpriseId ?? undefined,
+        action: "LOGIN_FAILED",
+        resource: "User",
+        resourceId: user.id,
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+        metadata: { reason: "account_inactive", userStatus: user.status, enterpriseStatus: user.enterprise?.status },
       });
       throw new UnauthorizedException(GENERIC_LOGIN_ERROR);
     }
@@ -212,7 +230,10 @@ export class AuthService {
 
   async refresh(rawToken: string, meta: RequestMetadata): Promise<{ accessToken: string; refreshToken: string }> {
     const tokenHash = this.tokenService.hashToken(rawToken);
-    const existing = await this.prisma.refreshToken.findUnique({ where: { tokenHash }, include: { user: true } });
+    const existing = await this.prisma.refreshToken.findUnique({
+      where: { tokenHash },
+      include: { user: { include: { enterprise: true } } },
+    });
 
     if (!existing) {
       throw new UnauthorizedException("Jeton de rafraîchissement invalide");
@@ -245,6 +266,32 @@ export class AuthService {
         data: { status: RefreshTokenStatus.REVOKED, revokedAt: new Date() },
       });
       throw new UnauthorizedException("Session expirée");
+    }
+
+    // Corrige SEC-03 (docs/audit/SECURITY-AUDIT.md) : re-vérifié à chaque
+    // refresh (pas seulement au login) pour qu'une suspension décidée en
+    // cours de session prenne effet au plus tard au refresh suivant, sans
+    // attendre l'expiration naturelle de l'access token (≤15 min). Toute la
+    // famille est révoquée : pas de nouvelle tentative de refresh possible
+    // avec un autre jeton de la même session.
+    if (existing.user.status !== "ACTIVE" || (existing.user.enterprise && existing.user.enterprise.status !== "ACTIVE")) {
+      await this.prisma.refreshToken.updateMany({
+        where: { familyId: existing.familyId, status: { not: RefreshTokenStatus.REVOKED } },
+        data: { status: RefreshTokenStatus.REVOKED, revokedAt: new Date() },
+      });
+
+      await this.auditLog.record({
+        userId: existing.userId,
+        enterpriseId: existing.user.enterpriseId ?? undefined,
+        action: "REFRESH_REJECTED_INACTIVE_ACCOUNT",
+        resource: "RefreshToken",
+        resourceId: existing.id,
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+        metadata: { userStatus: existing.user.status, enterpriseStatus: existing.user.enterprise?.status },
+      });
+
+      throw new UnauthorizedException("Compte ou entreprise suspendu(e)");
     }
 
     const rawNewToken = this.tokenService.generateOpaqueToken();

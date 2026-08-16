@@ -3,12 +3,12 @@ import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { AppModule } from "../app.module";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { PasswordService } from "./password.service";
 
 describe("Auth (integration)", () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let prisma: RawDbClient;
   let passwordService: PasswordService;
 
   const testRunId = randomUUID();
@@ -22,7 +22,7 @@ describe("Auth (integration)", () => {
 
     app = moduleRef.createNestApplication();
     await app.init();
-    prisma = app.get(PrismaService);
+    prisma = new RawDbClient();
     passwordService = app.get(PasswordService);
   });
 
@@ -120,6 +120,54 @@ describe("Auth (integration)", () => {
       .post("/auth/login")
       .send({ email: user.email, password: plainPassword })
       .expect(200);
+  });
+
+  it("rejects login for a SUSPENDED user with the generic error (SEC-03)", async () => {
+    const { user, plainPassword } = await createTestUser();
+    await prisma.user.update({ where: { id: user.id }, data: { status: "SUSPENDED" } });
+
+    const res = await request(app.getHttpServer())
+      .post("/auth/login")
+      .send({ email: user.email, password: plainPassword })
+      .expect(401);
+
+    expect(res.body.message).toBe("Identifiants invalides");
+
+    const logs = await prisma.auditLog.findMany({
+      where: { userId: user.id, action: "LOGIN_FAILED", metadata: { path: ["reason"], equals: "account_inactive" } },
+    });
+    expect(logs).toHaveLength(1);
+  });
+
+  it("rejects login for an active user of a SUSPENDED enterprise (SEC-03)", async () => {
+    const { user, enterprise, plainPassword } = await createTestUser();
+    await prisma.enterprise.update({ where: { id: enterprise.id }, data: { status: "SUSPENDED" } });
+
+    await request(app.getHttpServer())
+      .post("/auth/login")
+      .send({ email: user.email, password: plainPassword })
+      .expect(401);
+  });
+
+  it("rejects refresh once the enterprise is suspended after login, revoking the whole family (SEC-03)", async () => {
+    const { user, enterprise, plainPassword } = await createTestUser();
+
+    const loginRes = await request(app.getHttpServer())
+      .post("/auth/login")
+      .send({ email: user.email, password: plainPassword })
+      .expect(200);
+
+    await prisma.enterprise.update({ where: { id: enterprise.id }, data: { status: "SUSPENDED" } });
+
+    await request(app.getHttpServer())
+      .post("/auth/refresh")
+      .send({ refreshToken: loginRes.body.refreshToken })
+      .expect(401);
+
+    const logs = await prisma.auditLog.findMany({
+      where: { userId: user.id, action: "REFRESH_REJECTED_INACTIVE_ACCOUNT" },
+    });
+    expect(logs).toHaveLength(1);
   });
 
   it("rotates the refresh token and rejects the old one on reuse, revoking the whole family", async () => {

@@ -136,6 +136,9 @@ enum AuditAction {
   USER_INVITED
   INVITATION_ACCEPTED
   ENTERPRISE_PROVISIONED
+  // Corrige SEC-03 (docs/audit/SECURITY-AUDIT.md) : refresh rejeté car
+  // User.status ou Enterprise.status n'est plus ACTIVE.
+  REFRESH_REJECTED_INACTIVE_ACCOUNT
 }
 
 // ACTIVE : jamais utilisé. ROTATED : échangé contre un nouveau token (rotation
