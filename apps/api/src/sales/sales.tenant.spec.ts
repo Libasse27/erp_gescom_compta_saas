@@ -3,7 +3,7 @@ import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { AppModule } from "../app.module";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { PasswordService } from "../auth/password.service";
 
 // Suite test:tenant — copie conforme de stock.tenant.spec.ts (module 5 de la
@@ -14,7 +14,7 @@ import { PasswordService } from "../auth/password.service";
 // module qui n'a pas de champ enterpriseId direct dans son body.
 describe("SalesController — tenant isolation (integration)", () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let prisma: RawDbClient;
   let passwordService: PasswordService;
   let salesFeatureId: string;
 
@@ -25,7 +25,7 @@ describe("SalesController — tenant isolation (integration)", () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
-    prisma = app.get(PrismaService);
+    prisma = new RawDbClient();
     passwordService = app.get(PasswordService);
 
     const feature = await prisma.feature.upsert({

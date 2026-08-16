@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { TenantContext } from "./tenant-context";
 import { TenantScopedPrismaService } from "./tenant-scoped-prisma.service";
 
@@ -8,8 +9,20 @@ import { TenantScopedPrismaService } from "./tenant-scoped-prisma.service";
 // table. Le test générique "tous les endpoints de liste" appliqué au premier
 // vrai endpoint de liste tenant (GET /customers, Phase 8) vit dans
 // customers/customers.tenant.spec.ts, au niveau HTTP plutôt qu'ici.
+//
+// `prisma` (rôle identité, erp_app_identity) n'est utilisé ici que pour les
+// tables qu'il a réellement le droit de toucher — celles effectivement
+// touchées par un flux pré-tenant en production (enterprises,
+// invoice_counters, accounts — voir migration
+// 20260816120000_add_identity_role) — et pour les deux tests de garde
+// pg_roles en fin de fichier. Les fixtures sur des tables hors de son
+// périmètre (onboarding_states, customers, suppliers, products,
+// stock_movements, sales — aucune n'est touchée par un des flux identité
+// listés dans cette migration) passent par `rawDb` (rôle propriétaire,
+// réservé aux tests — voir docs/audit/MULTI-TENANT-AUDIT.md MT-01).
 describe("Tenant isolation (RLS + TenantContext)", () => {
   const prisma = new PrismaService();
+  const rawDb = new RawDbClient();
   const tenantPrisma = new TenantScopedPrismaService();
 
   const createdEnterpriseIds: string[] = [];
@@ -22,6 +35,7 @@ describe("Tenant isolation (RLS + TenantContext)", () => {
     await prisma.enterprise.deleteMany({ where: { id: { in: createdEnterpriseIds } } });
     await tenantPrisma.onModuleDestroy();
     await prisma.$disconnect();
+    await rawDb.$disconnect();
   });
 
   async function createEnterprise(name: string) {
@@ -112,58 +126,58 @@ describe("Tenant isolation (RLS + TenantContext)", () => {
   it("scopes onboarding_states to the current tenant (Phase 7.4, assistant post-inscription)", async () => {
     const enterpriseA = await createEnterprise(`Tenant A ${randomUUID()}`);
     const enterpriseB = await createEnterprise(`Tenant B ${randomUUID()}`);
-    await prisma.onboardingState.create({ data: { enterpriseId: enterpriseA.id, currentStep: 6 } });
-    await prisma.onboardingState.create({ data: { enterpriseId: enterpriseB.id, currentStep: 7 } });
+    await rawDb.onboardingState.create({ data: { enterpriseId: enterpriseA.id, currentStep: 6 } });
+    await rawDb.onboardingState.create({ data: { enterpriseId: enterpriseB.id, currentStep: 7 } });
 
     const seenByA = await TenantContext.run({ tenantId: enterpriseA.id, userId: randomUUID(), isSuperAdmin: false }, () =>
       tenantPrisma.run((tx) => tx.onboardingState.findMany()),
     );
     expect(seenByA.map((s) => s.enterpriseId)).toEqual([enterpriseA.id]);
 
-    await prisma.onboardingState.deleteMany({ where: { enterpriseId: { in: [enterpriseA.id, enterpriseB.id] } } });
+    await rawDb.onboardingState.deleteMany({ where: { enterpriseId: { in: [enterpriseA.id, enterpriseB.id] } } });
   });
 
   it("scopes customers to the current tenant (Phase 8, module Clients)", async () => {
     const enterpriseA = await createEnterprise(`Tenant A ${randomUUID()}`);
     const enterpriseB = await createEnterprise(`Tenant B ${randomUUID()}`);
-    await prisma.customer.create({ data: { enterpriseId: enterpriseA.id, type: "COMPANY", name: "Client A" } });
-    await prisma.customer.create({ data: { enterpriseId: enterpriseB.id, type: "COMPANY", name: "Client B" } });
+    await rawDb.customer.create({ data: { enterpriseId: enterpriseA.id, type: "COMPANY", name: "Client A" } });
+    await rawDb.customer.create({ data: { enterpriseId: enterpriseB.id, type: "COMPANY", name: "Client B" } });
 
     const seenByA = await TenantContext.run({ tenantId: enterpriseA.id, userId: randomUUID(), isSuperAdmin: false }, () =>
       tenantPrisma.run((tx) => tx.customer.findMany()),
     );
     expect(seenByA.map((c) => c.enterpriseId)).toEqual([enterpriseA.id]);
 
-    await prisma.customer.deleteMany({ where: { enterpriseId: { in: [enterpriseA.id, enterpriseB.id] } } });
+    await rawDb.customer.deleteMany({ where: { enterpriseId: { in: [enterpriseA.id, enterpriseB.id] } } });
   });
 
   it("scopes suppliers to the current tenant (Phase 8, module Fournisseurs)", async () => {
     const enterpriseA = await createEnterprise(`Tenant A ${randomUUID()}`);
     const enterpriseB = await createEnterprise(`Tenant B ${randomUUID()}`);
-    await prisma.supplier.create({ data: { enterpriseId: enterpriseA.id, type: "COMPANY", name: "Fournisseur A" } });
-    await prisma.supplier.create({ data: { enterpriseId: enterpriseB.id, type: "COMPANY", name: "Fournisseur B" } });
+    await rawDb.supplier.create({ data: { enterpriseId: enterpriseA.id, type: "COMPANY", name: "Fournisseur A" } });
+    await rawDb.supplier.create({ data: { enterpriseId: enterpriseB.id, type: "COMPANY", name: "Fournisseur B" } });
 
     const seenByA = await TenantContext.run({ tenantId: enterpriseA.id, userId: randomUUID(), isSuperAdmin: false }, () =>
       tenantPrisma.run((tx) => tx.supplier.findMany()),
     );
     expect(seenByA.map((s) => s.enterpriseId)).toEqual([enterpriseA.id]);
 
-    await prisma.supplier.deleteMany({ where: { enterpriseId: { in: [enterpriseA.id, enterpriseB.id] } } });
+    await rawDb.supplier.deleteMany({ where: { enterpriseId: { in: [enterpriseA.id, enterpriseB.id] } } });
   });
 
   it("scopes stock_movements to the current tenant (Phase 8, module Stock)", async () => {
     const enterpriseA = await createEnterprise(`Tenant A ${randomUUID()}`);
     const enterpriseB = await createEnterprise(`Tenant B ${randomUUID()}`);
-    const productA = await prisma.product.create({
+    const productA = await rawDb.product.create({
       data: { enterpriseId: enterpriseA.id, code: `SKU-${randomUUID()}`, name: "Produit A", sellingPriceExcludingTax: 1_000 },
     });
-    const productB = await prisma.product.create({
+    const productB = await rawDb.product.create({
       data: { enterpriseId: enterpriseB.id, code: `SKU-${randomUUID()}`, name: "Produit B", sellingPriceExcludingTax: 1_000 },
     });
-    await prisma.stockMovement.create({
+    await rawDb.stockMovement.create({
       data: { enterpriseId: enterpriseA.id, productId: productA.id, type: "IN", quantity: 10 },
     });
-    await prisma.stockMovement.create({
+    await rawDb.stockMovement.create({
       data: { enterpriseId: enterpriseB.id, productId: productB.id, type: "IN", quantity: 10 },
     });
 
@@ -172,29 +186,29 @@ describe("Tenant isolation (RLS + TenantContext)", () => {
     );
     expect(seenByA.map((m) => m.enterpriseId)).toEqual([enterpriseA.id]);
 
-    await prisma.stockMovement.deleteMany({ where: { enterpriseId: { in: [enterpriseA.id, enterpriseB.id] } } });
-    await prisma.product.deleteMany({ where: { id: { in: [productA.id, productB.id] } } });
+    await rawDb.stockMovement.deleteMany({ where: { enterpriseId: { in: [enterpriseA.id, enterpriseB.id] } } });
+    await rawDb.product.deleteMany({ where: { id: { in: [productA.id, productB.id] } } });
   });
 
   it("scopes sales to the current tenant (Phase 8, module Ventes)", async () => {
     const enterpriseA = await createEnterprise(`Tenant A ${randomUUID()}`);
     const enterpriseB = await createEnterprise(`Tenant B ${randomUUID()}`);
-    const customerA = await prisma.customer.create({
+    const customerA = await rawDb.customer.create({
       data: { enterpriseId: enterpriseA.id, type: "COMPANY", name: "Client A" },
     });
-    const customerB = await prisma.customer.create({
+    const customerB = await rawDb.customer.create({
       data: { enterpriseId: enterpriseB.id, type: "COMPANY", name: "Client B" },
     });
-    const saleA = await prisma.sale.create({ data: { enterpriseId: enterpriseA.id, customerId: customerA.id } });
-    const saleB = await prisma.sale.create({ data: { enterpriseId: enterpriseB.id, customerId: customerB.id } });
+    const saleA = await rawDb.sale.create({ data: { enterpriseId: enterpriseA.id, customerId: customerA.id } });
+    const saleB = await rawDb.sale.create({ data: { enterpriseId: enterpriseB.id, customerId: customerB.id } });
 
     const seenByA = await TenantContext.run({ tenantId: enterpriseA.id, userId: randomUUID(), isSuperAdmin: false }, () =>
       tenantPrisma.run((tx) => tx.sale.findMany()),
     );
     expect(seenByA.map((s) => s.enterpriseId)).toEqual([enterpriseA.id]);
 
-    await prisma.sale.deleteMany({ where: { id: { in: [saleA.id, saleB.id] } } });
-    await prisma.customer.deleteMany({ where: { id: { in: [customerA.id, customerB.id] } } });
+    await rawDb.sale.deleteMany({ where: { id: { in: [saleA.id, saleB.id] } } });
+    await rawDb.customer.deleteMany({ where: { id: { in: [customerA.id, customerB.id] } } });
   });
 
   it("erp_app_tenant is neither superuser nor RLS-bypassing, and does not own the tenant tables", async () => {
@@ -210,5 +224,25 @@ describe("Tenant isolation (RLS + TenantContext)", () => {
       FROM pg_tables WHERE schemaname = 'public' AND tablename = 'enterprises'
     `;
     expect(ownership!.owner_is_tenant_role).toBe(false);
+  });
+
+  // Corrige MT-01 (docs/audit/MULTI-TENANT-AUDIT.md) : PrismaService (rôle
+  // "identité") ne doit plus jamais retomber sur le rôle superuser/
+  // propriétaire des tables. BYPASSRLS est ici attendu à `true` (à la
+  // différence de erp_app_tenant) : c'est le mécanisme volontaire qui
+  // remplace la RLS pour les flux pré-tenant, PAS le superuser.
+  it("erp_app_identity is neither superuser nor table owner (BYPASSRLS is the intended, narrower substitute)", async () => {
+    const [role] = await prisma.$queryRaw<{ rolsuper: boolean; rolbypassrls: boolean }[]>`
+      SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'erp_app_identity'
+    `;
+    expect(role).toBeDefined();
+    expect(role!.rolsuper).toBe(false);
+    expect(role!.rolbypassrls).toBe(true);
+
+    const [ownership] = await prisma.$queryRaw<{ owner_is_identity_role: boolean }[]>`
+      SELECT (tableowner = 'erp_app_identity') AS owner_is_identity_role
+      FROM pg_tables WHERE schemaname = 'public' AND tablename = 'enterprises'
+    `;
+    expect(ownership!.owner_is_identity_role).toBe(false);
   });
 });

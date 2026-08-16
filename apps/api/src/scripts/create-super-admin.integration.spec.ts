@@ -1,12 +1,12 @@
 import { authenticator } from "otplib";
 import { randomUUID } from "node:crypto";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { PasswordService } from "../auth/password.service";
 import { MfaService } from "../auth/mfa.service";
 import { createSuperAdmin } from "./create-super-admin";
 
 describe("createSuperAdmin (integration)", () => {
-  const prisma = new PrismaService();
+  const prisma = new RawDbClient();
   const passwordService = new PasswordService();
   const mfaService = new MfaService();
   const deps = { prisma, passwordService, mfaService };

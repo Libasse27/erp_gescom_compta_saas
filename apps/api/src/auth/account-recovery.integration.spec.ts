@@ -3,7 +3,7 @@ import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { AppModule } from "../app.module";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { PasswordService } from "./password.service";
 import { AccountRecoveryService } from "./account-recovery.service";
 import { MAIL_SENDER, MailMessage, MailSender } from "../notifications/mail-sender";
@@ -30,7 +30,7 @@ class CapturingMailSender implements MailSender {
 
 describe("Account recovery (integration)", () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let prisma: RawDbClient;
   let passwordService: PasswordService;
   let accountRecoveryService: AccountRecoveryService;
   const mailSender = new CapturingMailSender();
@@ -45,7 +45,7 @@ describe("Account recovery (integration)", () => {
 
     app = moduleRef.createNestApplication();
     await app.init();
-    prisma = app.get(PrismaService);
+    prisma = new RawDbClient();
     passwordService = app.get(PasswordService);
     accountRecoveryService = app.get(AccountRecoveryService);
   });

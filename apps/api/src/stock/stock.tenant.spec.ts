@@ -3,7 +3,7 @@ import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { AppModule } from "../app.module";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { PasswordService } from "../auth/password.service";
 
 // Suite test:tenant — copie conforme de products.tenant.spec.ts (module 4
@@ -13,7 +13,7 @@ import { PasswordService } from "../auth/password.service";
 // POST /stock/movements doit être rejeté (404), jamais scopé silencieusement.
 describe("StockController — tenant isolation (integration)", () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let prisma: RawDbClient;
   let passwordService: PasswordService;
   let stockFeatureId: string;
 
@@ -24,7 +24,7 @@ describe("StockController — tenant isolation (integration)", () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
-    prisma = app.get(PrismaService);
+    prisma = new RawDbClient();
     passwordService = app.get(PasswordService);
 
     const feature = await prisma.feature.upsert({

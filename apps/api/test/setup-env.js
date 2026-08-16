@@ -7,6 +7,9 @@ require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 if (process.env.DATABASE_URL) {
   process.env.DATABASE_URL = process.env.DATABASE_URL.replace(/\/erp_saas_dev(\?|$)/, "/erp_saas_test$1");
 }
+if (process.env.IDENTITY_DATABASE_URL) {
+  process.env.IDENTITY_DATABASE_URL = process.env.IDENTITY_DATABASE_URL.replace(/\/erp_saas_dev(\?|$)/, "/erp_saas_test$1");
+}
 if (process.env.TENANT_DATABASE_URL) {
   process.env.TENANT_DATABASE_URL = process.env.TENANT_DATABASE_URL.replace(/\/erp_saas_dev(\?|$)/, "/erp_saas_test$1");
 }

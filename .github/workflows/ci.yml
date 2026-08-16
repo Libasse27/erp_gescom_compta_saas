@@ -20,6 +20,10 @@ env:
   # jamais utilisés hors CI/local. Base de test dédiée, jamais la base de
   # dev (voir apps/api/test/global-setup.js et setup-env.js).
   DATABASE_URL: postgresql://erp:erp_dev_password@localhost:5432/erp_saas_test?schema=public
+  # Rôle identité (docs/adr/0008-..., corrige MT-01) créé par la migration
+  # 20260816120000_add_identity_role avec ce mot de passe de dev en dur —
+  # acceptable en CI, jamais en production (voir scripts/prod-post-deploy.sh).
+  IDENTITY_DATABASE_URL: postgresql://erp_app_identity:erp_identity_dev_password@localhost:5432/erp_saas_test?schema=public
   # Rôle RLS (docs/adr/0008-...) créé par la migration
   # 20260809113836_add_tenant_role_and_rls avec ce mot de passe de dev en
   # dur — acceptable en CI, jamais en production (voir

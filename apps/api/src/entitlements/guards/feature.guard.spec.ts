@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { ExecutionContext, ForbiddenException } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { randomUUID } from "node:crypto";
-import { PrismaService } from "../../prisma/prisma.service";
+import { RawDbClient } from "../../prisma/raw-db-client";
 import { TenantContext } from "../../tenant/tenant-context";
 import { TenantScopedPrismaService } from "../../tenant/tenant-scoped-prisma.service";
 import { EntitlementsService } from "../entitlements.service";
@@ -19,7 +19,7 @@ const FEATURE_KEY = `feat.${randomUUID()}`;
 // entitlements/entitlements.service.spec.ts teste EntitlementsService sans
 // passer par une route HTTP.
 describe("FeatureGuard", () => {
-  const prisma = new PrismaService();
+  const prisma = new RawDbClient();
   const tenantPrisma = new TenantScopedPrismaService();
   const reflector = new Reflector();
 

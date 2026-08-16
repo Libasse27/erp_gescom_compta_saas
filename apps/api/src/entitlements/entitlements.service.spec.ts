@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { SubscriptionStatus } from "@prisma/client";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { TenantContext } from "../tenant/tenant-context";
 import { TenantScopedPrismaService } from "../tenant/tenant-scoped-prisma.service";
 import { EntitlementsService } from "./entitlements.service";
@@ -9,7 +9,7 @@ import { EntitlementsService } from "./entitlements.service";
 // style que tenant/tenant-isolation.tenant.spec.ts : instanciation directe,
 // base réelle, TenantContext.run() explicite.
 describe("EntitlementsService", () => {
-  const prisma = new PrismaService();
+  const prisma = new RawDbClient();
   const tenantPrisma = new TenantScopedPrismaService();
 
   const createdEnterpriseIds: string[] = [];

@@ -4,7 +4,7 @@ import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { PermissionKey } from "@erp/permissions";
 import { AppModule } from "../app.module";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { PasswordService } from "../auth/password.service";
 
 // Module 4 de la Phase 8 : contrairement à Clients/Fournisseurs/Produits
@@ -16,7 +16,7 @@ import { PasswordService } from "../auth/password.service";
 // "stock" est le sujet de ce module.
 describe("StockController (integration)", () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let prisma: RawDbClient;
   let passwordService: PasswordService;
   let stockFeatureId: string;
 
@@ -27,7 +27,7 @@ describe("StockController (integration)", () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
-    prisma = app.get(PrismaService);
+    prisma = new RawDbClient();
     passwordService = app.get(PasswordService);
 
     const feature = await prisma.feature.upsert({

@@ -3,13 +3,13 @@ import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { AppModule } from "../app.module";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 
 // Phase 7.1 : GET /plans public, nécessaire pour que l'inscription puisse
 // afficher un choix de forfait réel (docs/SPECIFICATIONS-SAAS.md §7 étape 3).
 describe("PlansController — GET /plans (integration)", () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let prisma: RawDbClient;
 
   const createdPlanIds: string[] = [];
 
@@ -17,7 +17,7 @@ describe("PlansController — GET /plans (integration)", () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
-    prisma = app.get(PrismaService);
+    prisma = new RawDbClient();
   });
 
   afterAll(async () => {

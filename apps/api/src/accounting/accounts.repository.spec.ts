@@ -1,6 +1,6 @@
 import { ConflictException, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { TenantContext } from "../tenant/tenant-context";
 import { TenantScopedPrismaService } from "../tenant/tenant-scoped-prisma.service";
 import { AccountsRepository } from "./accounts.repository";
@@ -11,7 +11,7 @@ import { JournalRepository } from "./journal.repository";
 // JournalRepository prépare les fixtures de solde (réutilise le module déjà
 // testé plutôt que d'insérer des JournalEntryLine à la main).
 describe("AccountsRepository", () => {
-  const prisma = new PrismaService();
+  const prisma = new RawDbClient();
   const tenantPrisma = new TenantScopedPrismaService();
   const repository = new AccountsRepository(tenantPrisma);
   const journalRepository = new JournalRepository(tenantPrisma);

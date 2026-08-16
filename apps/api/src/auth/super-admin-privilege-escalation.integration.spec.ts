@@ -3,7 +3,7 @@ import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { AppModule } from "../app.module";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { PasswordService } from "./password.service";
 
 // Test 5 du plan (docs/PROMPT-MAITRE-SAAS.md §E) : un ADMIN d'entreprise ne
@@ -14,7 +14,7 @@ import { PasswordService } from "./password.service";
 // (docs/adr/0004-modele-identite.md) empêche un état incohérent.
 describe("Super Admin privilege escalation defenses (integration)", () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let prisma: RawDbClient;
   let passwordService: PasswordService;
 
   const createdEnterpriseIds: string[] = [];
@@ -23,7 +23,7 @@ describe("Super Admin privilege escalation defenses (integration)", () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
-    prisma = app.get(PrismaService);
+    prisma = new RawDbClient();
     passwordService = app.get(PasswordService);
   });
 

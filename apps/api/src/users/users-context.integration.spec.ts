@@ -3,7 +3,7 @@ import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { AppModule } from "../app.module";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { PasswordService } from "../auth/password.service";
 
 // Phase 7.2 (docs/PROMPT-MAITRE-SAAS.md) : GET /users/me/context pilote le
@@ -11,7 +11,7 @@ import { PasswordService } from "../auth/password.service";
 // Utilisateurs — tous deux tenant-scoped, lecture seule.
 describe("UsersController — me/context & list (integration)", () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let prisma: RawDbClient;
   let passwordService: PasswordService;
 
   const createdEnterpriseIds: string[] = [];
@@ -21,7 +21,7 @@ describe("UsersController — me/context & list (integration)", () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
-    prisma = app.get(PrismaService);
+    prisma = new RawDbClient();
     passwordService = app.get(PasswordService);
   });
 

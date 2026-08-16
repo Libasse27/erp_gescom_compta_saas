@@ -3,7 +3,7 @@ import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { AppModule } from "../app.module";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { DEFAULT_ROLE_NAMES, DEFAULT_ROLE_PERMISSIONS, PERMISSION_KEYS } from "@erp/permissions";
 import { SYSCOHADA_ACCOUNT_CLASSES } from "./syscohada-chart-of-accounts";
 
@@ -12,7 +12,7 @@ import { SYSCOHADA_ACCOUNT_CLASSES } from "./syscohada-chart-of-accounts";
 // l'email, plan comptable SYSCOHADA initialisé.
 describe("ProvisioningController — POST /auth/register (integration)", () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let prisma: RawDbClient;
 
   const createdEnterpriseIds: string[] = [];
   const createdPlanIds: string[] = [];
@@ -22,7 +22,7 @@ describe("ProvisioningController — POST /auth/register (integration)", () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
-    prisma = app.get(PrismaService);
+    prisma = new RawDbClient();
 
     // Catalogue complet requis (DEFAULT_ROLE_PERMISSIONS couvre toutes les
     // clés) : le seed global (prisma db seed) ne tourne pas automatiquement

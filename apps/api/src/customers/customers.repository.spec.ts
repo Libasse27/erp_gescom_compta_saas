@@ -1,6 +1,6 @@
 import { NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { TenantContext } from "../tenant/tenant-context";
 import { TenantScopedPrismaService } from "../tenant/tenant-scoped-prisma.service";
 import { CustomersRepository } from "./customers.repository";
@@ -9,7 +9,7 @@ import { CustomersRepository } from "./customers.repository";
 // (via TenantContext.run), sans passer par une route HTTP — la pagination et
 // la recherche sont des préoccupations du repository, pas du contrôleur.
 describe("CustomersRepository", () => {
-  const prisma = new PrismaService();
+  const prisma = new RawDbClient();
   const tenantPrisma = new TenantScopedPrismaService();
   const repository = new CustomersRepository(tenantPrisma);
 

@@ -4,7 +4,7 @@ import request from "supertest";
 import { randomUUID, createHmac } from "node:crypto";
 import { authenticator } from "otplib";
 import { AppModule } from "../app.module";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { PasswordService } from "../auth/password.service";
 import { MfaService } from "../auth/mfa.service";
 
@@ -15,7 +15,7 @@ import { MfaService } from "../auth/mfa.service";
 // changement de statut / une seule facture", pas "un seul abonnement créé".
 describe("PaymentsWebhookController (integration)", () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let prisma: RawDbClient;
   let passwordService: PasswordService;
   let mfaService: MfaService;
 
@@ -29,7 +29,7 @@ describe("PaymentsWebhookController (integration)", () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication({ rawBody: true });
     await app.init();
-    prisma = app.get(PrismaService);
+    prisma = new RawDbClient();
     passwordService = app.get(PasswordService);
     mfaService = app.get(MfaService);
   });

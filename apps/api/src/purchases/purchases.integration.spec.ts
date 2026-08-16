@@ -4,7 +4,7 @@ import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { PermissionKey } from "@erp/permissions";
 import { AppModule } from "../app.module";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { PasswordService } from "../auth/password.service";
 
 // Module 6 de la Phase 8, miroir de sales.integration.spec.ts. Fournisseurs
@@ -12,7 +12,7 @@ import { PasswordService } from "../auth/password.service";
 // comme Sales) : seule la feature "purchases" est le sujet de ce module.
 describe("PurchasesController (integration)", () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let prisma: RawDbClient;
   let passwordService: PasswordService;
   let purchasesFeatureId: string;
 
@@ -23,7 +23,7 @@ describe("PurchasesController (integration)", () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
-    prisma = app.get(PrismaService);
+    prisma = new RawDbClient();
     passwordService = app.get(PasswordService);
 
     const feature = await prisma.feature.upsert({

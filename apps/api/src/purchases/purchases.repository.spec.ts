@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { TenantContext } from "../tenant/tenant-context";
 import { TenantScopedPrismaService } from "../tenant/tenant-scoped-prisma.service";
 import { SuppliersRepository } from "../suppliers/suppliers.repository";
@@ -15,7 +15,7 @@ import { PurchasesRepository } from "./purchases.repository";
 // unitCostExcludingTax est fourni par l'appelant plutôt que résolu depuis
 // Product.
 describe("PurchasesRepository", () => {
-  const prisma = new PrismaService();
+  const prisma = new RawDbClient();
   const tenantPrisma = new TenantScopedPrismaService();
   const suppliersRepository = new SuppliersRepository(tenantPrisma);
   const productsRepository = new ProductsRepository(tenantPrisma);

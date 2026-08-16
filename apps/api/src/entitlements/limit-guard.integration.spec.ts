@@ -3,7 +3,7 @@ import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { AppModule } from "../app.module";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { PasswordService } from "../auth/password.service";
 
 // Phase 4, critère "dépassement de quota (utilisateurs...) → erreur
@@ -13,7 +13,7 @@ import { PasswordService } from "../auth/password.service";
 // d'écriture soumis à @WithinLimit.
 describe("LimitGuard — quota utilisateurs (integration)", () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let prisma: RawDbClient;
   let passwordService: PasswordService;
 
   const createdEnterpriseIds: string[] = [];
@@ -23,7 +23,7 @@ describe("LimitGuard — quota utilisateurs (integration)", () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
-    prisma = app.get(PrismaService);
+    prisma = new RawDbClient();
     passwordService = app.get(PasswordService);
   });
 

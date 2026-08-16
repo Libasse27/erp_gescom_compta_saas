@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { TenantContext } from "../tenant/tenant-context";
 import { TenantScopedPrismaService } from "../tenant/tenant-scoped-prisma.service";
 import { ProductsRepository } from "../products/products.repository";
@@ -12,7 +12,7 @@ import { StockRepository } from "./stock.repository";
 // mouvements (réutilise le module déjà testé plutôt que de dupliquer sa
 // logique de création).
 describe("StockRepository", () => {
-  const prisma = new PrismaService();
+  const prisma = new RawDbClient();
   const tenantPrisma = new TenantScopedPrismaService();
   const productsRepository = new ProductsRepository(tenantPrisma);
   const repository = new StockRepository(tenantPrisma);

@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { InvoiceGenerationService } from "./invoice-generation.service";
 
 // Numérotation séquentielle par tenant, sans trou, résistante à la
 // concurrence (docs/PROMPT-MAITRE-SAAS.md Phase 3 §"points de vigilance" /
 // Phase 5 critère "facture générée avec numérotation séquentielle par tenant").
 describe("InvoiceGenerationService", () => {
-  const prisma = new PrismaService();
+  const prisma = new RawDbClient();
   const service = new InvoiceGenerationService();
 
   const createdEnterpriseIds: string[] = [];

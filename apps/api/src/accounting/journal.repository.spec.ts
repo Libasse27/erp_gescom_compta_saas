@@ -1,6 +1,6 @@
 import { NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { TenantContext } from "../tenant/tenant-context";
 import { TenantScopedPrismaService } from "../tenant/tenant-scoped-prisma.service";
 import { AccountsRepository } from "./accounts.repository";
@@ -10,7 +10,7 @@ import { JournalRepository } from "./journal.repository";
 // accounts.repository.spec.ts. AccountsRepository prépare les comptes
 // nécessaires aux lignes d'écriture.
 describe("JournalRepository", () => {
-  const prisma = new PrismaService();
+  const prisma = new RawDbClient();
   const tenantPrisma = new TenantScopedPrismaService();
   const accountsRepository = new AccountsRepository(tenantPrisma);
   const repository = new JournalRepository(tenantPrisma);

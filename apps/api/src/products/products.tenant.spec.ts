@@ -3,7 +3,7 @@ import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { AppModule } from "../app.module";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { PasswordService } from "../auth/password.service";
 
 // Suite test:tenant — copie conforme de suppliers.tenant.spec.ts (module 3
@@ -12,7 +12,7 @@ import { PasswordService } from "../auth/password.service";
 // enterpriseId forgé dans le corps d'une requête est sans effet.
 describe("ProductsController — tenant isolation (integration)", () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let prisma: RawDbClient;
   let passwordService: PasswordService;
   let productsFeatureId: string;
 
@@ -23,7 +23,7 @@ describe("ProductsController — tenant isolation (integration)", () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
-    prisma = app.get(PrismaService);
+    prisma = new RawDbClient();
     passwordService = app.get(PasswordService);
 
     const feature = await prisma.feature.upsert({

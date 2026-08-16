@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { TenantContext } from "../tenant/tenant-context";
 import { TenantScopedPrismaService } from "../tenant/tenant-scoped-prisma.service";
 import { CustomersRepository } from "../customers/customers.repository";
@@ -17,7 +17,7 @@ import { ReportsRepository } from "./reports.repository";
 // préparer les fixtures — même patron que
 // purchases.repository.spec.ts/invoicing.repository.spec.ts.
 describe("ReportsRepository", () => {
-  const prisma = new PrismaService();
+  const prisma = new RawDbClient();
   const tenantPrisma = new TenantScopedPrismaService();
   const customersRepository = new CustomersRepository(tenantPrisma);
   const suppliersRepository = new SuppliersRepository(tenantPrisma);

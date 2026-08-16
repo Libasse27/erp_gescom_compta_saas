@@ -1,5 +1,14 @@
 # 0008 — Deux rôles PostgreSQL : identité pré-tenant vs sessions scopées tenant
 
+> **Amendement 2026-08-16** — voir
+> `docs/adr/0018-role-identite-bypassrls-non-superuser.md`. Le rôle
+> "identité" décrit ci-dessous n'est plus `erp` (superuser/propriétaire des
+> tables, interdit par `CLAUDE.md` §5 — constat MT-01) mais un rôle dédié
+> `erp_app_identity` (NOSUPERUSER, non propriétaire, BYPASSRLS). Le
+> raisonnement de ce document (pourquoi une connexion hors RLS est
+> nécessaire pour ces flux) reste valable ; seul le rôle Postgres utilisé
+> pour l'incarner a changé.
+
 ## Statut
 Tranché — 2026-08-09
 

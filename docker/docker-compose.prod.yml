@@ -36,7 +36,14 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      # Réservée à `prisma migrate deploy` (exécuté via `docker compose run`,
+      # voir scripts/prod-post-deploy.sh) — PrismaService ne s'y connecte
+      # plus depuis la correction de MT-01, mais Prisma Migrate la lit
+      # directement depuis l'environnement du conteneur au démarrage normal
+      # aussi ; on la laisse donc présente pour ne pas casser un `migrate
+      # deploy` relancé manuellement depuis ce même service.
       DATABASE_URL: ${DATABASE_URL}
+      IDENTITY_DATABASE_URL: ${IDENTITY_DATABASE_URL}
       TENANT_DATABASE_URL: ${TENANT_DATABASE_URL}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL}

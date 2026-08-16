@@ -4,7 +4,7 @@ import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { PermissionKey } from "@erp/permissions";
 import { AppModule } from "../app.module";
-import { PrismaService } from "../prisma/prisma.service";
+import { RawDbClient } from "../prisma/raw-db-client";
 import { PasswordService } from "../auth/password.service";
 
 // Module 8 de la Phase 8, miroir de sales.integration.spec.ts et consorts.
@@ -13,7 +13,7 @@ import { PasswordService } from "../auth/password.service";
 // feature/un seul groupe de permissions ("accounting").
 describe("AccountingController (integration)", () => {
   let app: INestApplication;
-  let prisma: PrismaService;
+  let prisma: RawDbClient;
   let passwordService: PasswordService;
   let accountingFeatureId: string;
 
@@ -24,7 +24,7 @@ describe("AccountingController (integration)", () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
-    prisma = app.get(PrismaService);
+    prisma = new RawDbClient();
     passwordService = app.get(PasswordService);
 
     const feature = await prisma.feature.upsert({
