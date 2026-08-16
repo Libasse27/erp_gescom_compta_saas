@@ -160,6 +160,34 @@ describe("InvoicingController (integration)", () => {
     expect(paidRes.body.status).toBe("PAID");
   });
 
+  // Régression MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) — même patron
+  // que sales.integration.spec.ts.
+  it("returns the same invoice on a replayed POST /invoices carrying the same Idempotency-Key header", async () => {
+    const { accessToken, enterpriseId } = await setupTenant(["invoicing.create"]);
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const sale = await createConfirmedSale(enterpriseId);
+    const idempotencyKey = randomUUID();
+
+    const firstRes = await request(app.getHttpServer())
+      .post("/invoices")
+      .set(auth)
+      .set("Idempotency-Key", idempotencyKey)
+      .send({ saleId: sale.id })
+      .expect(201);
+
+    const secondRes = await request(app.getHttpServer())
+      .post("/invoices")
+      .set(auth)
+      .set("Idempotency-Key", idempotencyKey)
+      .send({ saleId: sale.id })
+      .expect(201);
+
+    expect(secondRes.body.id).toBe(firstRes.body.id);
+
+    const invoices = await prisma.salesInvoice.findMany({ where: { enterpriseId, saleId: sale.id } });
+    expect(invoices).toHaveLength(1);
+  });
+
   it("rejects invoicing a sale that is not confirmed (400)", async () => {
     const { accessToken, enterpriseId } = await setupTenant(["invoicing.create"]);
     const draft = await createDraftSale(enterpriseId);

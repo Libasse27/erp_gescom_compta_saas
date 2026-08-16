@@ -68,13 +68,25 @@ describe("PurchasesRepository", () => {
     );
   }
 
+  // create() renvoie désormais { view, created } (docs/adr/0019-...) : ce
+  // dépouilleur garde la majorité des tests lisibles sans changement
+  // supplémentaire.
+  async function createPurchase(
+    enterpriseId: string,
+    input: Parameters<PurchasesRepository["create"]>[1],
+    idempotencyKey?: string,
+  ) {
+    const { view } = await repository.create(enterpriseId, input, idempotencyKey);
+    return view;
+  }
+
   it("creates a DRAFT purchase, resolving the product's VAT and using the given cost, computing totals", async () => {
     const enterprise = await createEnterprise();
     const supplier = await createSupplier(enterprise.id);
     const product = await createProduct(enterprise.id);
 
     const purchase = await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, {
+      createPurchase(enterprise.id, {
         supplierId: supplier.id,
         lines: [{ productId: product.id, quantity: 3, unitCostExcludingTax: 700 }],
       }),
@@ -98,7 +110,7 @@ describe("PurchasesRepository", () => {
     const product = await createProduct(enterprise.id, { vatRateBasisPoints: 1_800 });
 
     const purchase = await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, {
+      createPurchase(enterprise.id, {
         supplierId: supplier.id,
         lines: [{ productId: product.id, quantity: 1, unitCostExcludingTax: 500 }],
       }),
@@ -118,7 +130,7 @@ describe("PurchasesRepository", () => {
     const product = await createProduct(enterprise.id, { trackStock: true });
 
     const purchase = await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, {
+      createPurchase(enterprise.id, {
         supplierId: supplier.id,
         lines: [{ productId: product.id, quantity: 8, unitCostExcludingTax: 500 }],
       }),
@@ -136,7 +148,7 @@ describe("PurchasesRepository", () => {
     const product = await createProduct(enterprise.id, { trackStock: false });
 
     const purchase = await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, {
+      createPurchase(enterprise.id, {
         supplierId: supplier.id,
         lines: [{ productId: product.id, quantity: 100, unitCostExcludingTax: 10 }],
       }),
@@ -152,7 +164,7 @@ describe("PurchasesRepository", () => {
     const product = await createProduct(enterprise.id, { trackStock: false });
 
     const purchase = await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, {
+      createPurchase(enterprise.id, {
         supplierId: supplier.id,
         lines: [{ productId: product.id, quantity: 1, unitCostExcludingTax: 10 }],
       }),
@@ -170,7 +182,7 @@ describe("PurchasesRepository", () => {
     const product = await createProduct(enterprise.id, { trackStock: false });
 
     const draft = await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, {
+      createPurchase(enterprise.id, {
         supplierId: supplier.id,
         lines: [{ productId: product.id, quantity: 1, unitCostExcludingTax: 10 }],
       }),
@@ -179,7 +191,7 @@ describe("PurchasesRepository", () => {
     expect(cancelled.status).toBe("CANCELLED");
 
     const confirmedPurchase = await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, {
+      createPurchase(enterprise.id, {
         supplierId: supplier.id,
         lines: [{ productId: product.id, quantity: 1, unitCostExcludingTax: 10 }],
       }),
@@ -199,12 +211,46 @@ describe("PurchasesRepository", () => {
 
     await expect(
       asTenant(enterpriseA.id, () =>
-        repository.create(enterpriseA.id, {
+        createPurchase(enterpriseA.id, {
           supplierId: supplierA.id,
           lines: [{ productId: productB.id, quantity: 1, unitCostExcludingTax: 10 }],
         }),
       ),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  // Régression MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) — même patron
+  // que sales.repository.spec.ts.
+  it("returns the same purchase without creating a duplicate when the same idempotency key is replayed", async () => {
+    const enterprise = await createEnterprise();
+    const supplier = await createSupplier(enterprise.id);
+    const product = await createProduct(enterprise.id);
+    const key = randomUUID();
+    const input = { supplierId: supplier.id, lines: [{ productId: product.id, quantity: 2, unitCostExcludingTax: 500 }] };
+
+    const first = await asTenant(enterprise.id, () => repository.create(enterprise.id, input, key));
+    const second = await asTenant(enterprise.id, () => repository.create(enterprise.id, input, key));
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.view.id).toBe(first.view.id);
+
+    const purchases = await prisma.purchase.findMany({ where: { enterpriseId: enterprise.id } });
+    expect(purchases).toHaveLength(1);
+  });
+
+  it("creates two distinct purchases when the idempotency key differs", async () => {
+    const enterprise = await createEnterprise();
+    const supplier = await createSupplier(enterprise.id);
+    const product = await createProduct(enterprise.id);
+    const input = { supplierId: supplier.id, lines: [{ productId: product.id, quantity: 1, unitCostExcludingTax: 10 }] };
+
+    const first = await asTenant(enterprise.id, () => createPurchase(enterprise.id, input, randomUUID()));
+    const second = await asTenant(enterprise.id, () => createPurchase(enterprise.id, input, randomUUID()));
+
+    expect(first.id).not.toBe(second.id);
+    const purchases = await prisma.purchase.findMany({ where: { enterpriseId: enterprise.id } });
+    expect(purchases).toHaveLength(2);
   });
 
   it("throws NotFoundException when reading a purchase that belongs to another enterprise", async () => {
@@ -214,7 +260,7 @@ describe("PurchasesRepository", () => {
     const productB = await createProduct(enterpriseB.id);
 
     const purchaseB = await asTenant(enterpriseB.id, () =>
-      repository.create(enterpriseB.id, {
+      createPurchase(enterpriseB.id, {
         supplierId: supplierB.id,
         lines: [{ productId: productB.id, quantity: 1, unitCostExcludingTax: 10 }],
       }),

@@ -92,11 +92,23 @@ describe("InvoicingRepository", () => {
     return sale;
   }
 
+  // InvoicingRepository.create() renvoie désormais { view, created }
+  // (docs/adr/0019-...) : ce dépouilleur garde la majorité des tests
+  // lisibles sans changement supplémentaire.
+  async function createInvoice(
+    enterpriseId: string,
+    input: Parameters<InvoicingRepository["create"]>[1],
+    idempotencyKey?: string,
+  ) {
+    const { view } = await repository.create(enterpriseId, input, idempotencyKey);
+    return view;
+  }
+
   it("issues an invoice for a CONFIRMED sale, matching its totals, with a sequential number", async () => {
     const enterprise = await createEnterprise();
     const sale = await createConfirmedSale(enterprise.id, 3);
 
-    const invoice = await asTenant(enterprise.id, () => repository.create(enterprise.id, { saleId: sale.id }));
+    const invoice = await asTenant(enterprise.id, () => createInvoice(enterprise.id, { saleId: sale.id }));
 
     expect(invoice.status).toBe("ISSUED");
     expect(invoice.saleId).toBe(sale.id);
@@ -114,8 +126,8 @@ describe("InvoicingRepository", () => {
     const saleA = await createConfirmedSale(enterprise.id);
     const saleB = await createConfirmedSale(enterprise.id);
 
-    const invoiceA = await asTenant(enterprise.id, () => repository.create(enterprise.id, { saleId: saleA.id }));
-    const invoiceB = await asTenant(enterprise.id, () => repository.create(enterprise.id, { saleId: saleB.id }));
+    const invoiceA = await asTenant(enterprise.id, () => createInvoice(enterprise.id, { saleId: saleA.id }));
+    const invoiceB = await asTenant(enterprise.id, () => createInvoice(enterprise.id, { saleId: saleB.id }));
 
     expect(invoiceA.number.endsWith("000001")).toBe(true);
     expect(invoiceB.number.endsWith("000002")).toBe(true);
@@ -126,17 +138,17 @@ describe("InvoicingRepository", () => {
     const draft = await createDraftSale(enterprise.id);
 
     await expect(
-      asTenant(enterprise.id, () => repository.create(enterprise.id, { saleId: draft.id })),
+      asTenant(enterprise.id, () => createInvoice(enterprise.id, { saleId: draft.id })),
     ).rejects.toThrow(BadRequestException);
   });
 
   it("rejects invoicing a sale that is already invoiced", async () => {
     const enterprise = await createEnterprise();
     const sale = await createConfirmedSale(enterprise.id);
-    await asTenant(enterprise.id, () => repository.create(enterprise.id, { saleId: sale.id }));
+    await asTenant(enterprise.id, () => createInvoice(enterprise.id, { saleId: sale.id }));
 
     await expect(
-      asTenant(enterprise.id, () => repository.create(enterprise.id, { saleId: sale.id })),
+      asTenant(enterprise.id, () => createInvoice(enterprise.id, { saleId: sale.id })),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -146,14 +158,14 @@ describe("InvoicingRepository", () => {
     const saleB = await createConfirmedSale(enterpriseB.id);
 
     await expect(
-      asTenant(enterpriseA.id, () => repository.create(enterpriseA.id, { saleId: saleB.id })),
+      asTenant(enterpriseA.id, () => createInvoice(enterpriseA.id, { saleId: saleB.id })),
     ).rejects.toThrow(NotFoundException);
   });
 
   it("marks an ISSUED invoice as PAID, and rejects marking it paid twice", async () => {
     const enterprise = await createEnterprise();
     const sale = await createConfirmedSale(enterprise.id);
-    const invoice = await asTenant(enterprise.id, () => repository.create(enterprise.id, { saleId: sale.id }));
+    const invoice = await asTenant(enterprise.id, () => createInvoice(enterprise.id, { saleId: sale.id }));
 
     const paid = await asTenant(enterprise.id, () => repository.markPaid(enterprise.id, invoice.id));
     expect(paid.status).toBe("PAID");
@@ -168,14 +180,14 @@ describe("InvoicingRepository", () => {
     const enterprise = await createEnterprise();
     const saleForVoid = await createConfirmedSale(enterprise.id);
     const invoiceToVoid = await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, { saleId: saleForVoid.id }),
+      createInvoice(enterprise.id, { saleId: saleForVoid.id }),
     );
     const voided = await asTenant(enterprise.id, () => repository.void(enterprise.id, invoiceToVoid.id));
     expect(voided.status).toBe("VOID");
     expect(voided.voidedAt).not.toBeNull();
 
     const salePaid = await createConfirmedSale(enterprise.id);
-    const invoicePaid = await asTenant(enterprise.id, () => repository.create(enterprise.id, { saleId: salePaid.id }));
+    const invoicePaid = await asTenant(enterprise.id, () => createInvoice(enterprise.id, { saleId: salePaid.id }));
     await asTenant(enterprise.id, () => repository.markPaid(enterprise.id, invoicePaid.id));
 
     await expect(asTenant(enterprise.id, () => repository.void(enterprise.id, invoicePaid.id))).rejects.toThrow(
@@ -183,11 +195,41 @@ describe("InvoicingRepository", () => {
     );
   });
 
+  // Régression MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) : un rejeu de la
+  // même clé doit renvoyer la facture déjà émise, jamais l'erreur "déjà
+  // facturée" (qui reste correcte pour une tentative sans la même clé).
+  it("returns the same invoice without creating a duplicate when the same idempotency key is replayed", async () => {
+    const enterprise = await createEnterprise();
+    const sale = await createConfirmedSale(enterprise.id);
+    const key = randomUUID();
+
+    const first = await asTenant(enterprise.id, () => repository.create(enterprise.id, { saleId: sale.id }, key));
+    const second = await asTenant(enterprise.id, () => repository.create(enterprise.id, { saleId: sale.id }, key));
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.view.id).toBe(first.view.id);
+
+    const invoices = await prisma.salesInvoice.findMany({ where: { enterpriseId: enterprise.id } });
+    expect(invoices).toHaveLength(1);
+  });
+
+  it("still rejects a genuine second invoicing attempt without a matching idempotency key", async () => {
+    const enterprise = await createEnterprise();
+    const sale = await createConfirmedSale(enterprise.id);
+
+    await asTenant(enterprise.id, () => createInvoice(enterprise.id, { saleId: sale.id }, randomUUID()));
+
+    await expect(
+      asTenant(enterprise.id, () => repository.create(enterprise.id, { saleId: sale.id }, randomUUID())),
+    ).rejects.toThrow(ConflictException);
+  });
+
   it("throws NotFoundException when reading an invoice that belongs to another enterprise", async () => {
     const enterpriseA = await createEnterprise();
     const enterpriseB = await createEnterprise();
     const saleB = await createConfirmedSale(enterpriseB.id);
-    const invoiceB = await asTenant(enterpriseB.id, () => repository.create(enterpriseB.id, { saleId: saleB.id }));
+    const invoiceB = await asTenant(enterpriseB.id, () => createInvoice(enterpriseB.id, { saleId: saleB.id }));
 
     await expect(
       asTenant(enterpriseA.id, () => repository.findByIdOrThrow(enterpriseA.id, invoiceB.id)),

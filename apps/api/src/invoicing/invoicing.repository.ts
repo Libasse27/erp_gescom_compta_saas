@@ -60,6 +60,13 @@ export interface SalesInvoiceListResult {
   pageSize: number;
 }
 
+// `created: false` signale un rejeu déduplié (docs/adr/0019-...) — même
+// patron que CreateSaleResult.
+export interface CreateSalesInvoiceResult {
+  view: SalesInvoiceView;
+  created: boolean;
+}
+
 type SaleWithLinesAndCustomer = Prisma.SaleGetPayload<{
   include: { lines: { include: { product: true } }; customer: true };
 }>;
@@ -102,8 +109,27 @@ function buildLegalMentions(enterprise: Enterprise, customer: Customer): string 
 export class InvoicingRepository {
   constructor(private readonly tenantPrisma: TenantScopedPrismaService) {}
 
-  async create(enterpriseId: string, input: CreateSalesInvoiceInput): Promise<SalesInvoiceView> {
+  async create(
+    enterpriseId: string,
+    input: CreateSalesInvoiceInput,
+    idempotencyKey?: string,
+  ): Promise<CreateSalesInvoiceResult> {
     return this.tenantPrisma.run(async (tx) => {
+      // Corrige MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...). Vérifié avant
+      // la contrainte "une facture par vente" ci-dessous : un rejeu portant
+      // la même clé doit renvoyer la facture déjà émise, jamais l'erreur
+      // "Cette vente est déjà facturée" (qui reste le comportement correct
+      // pour une seconde tentative de facturation sans la même clé).
+      if (idempotencyKey) {
+        const existingByKey = await tx.salesInvoice.findFirst({
+          where: { enterpriseId, idempotencyKey },
+          include: { sale: { include: { lines: { include: { product: true } }, customer: true } } },
+        });
+        if (existingByKey) {
+          return { view: this.toInvoiceView(existingByKey, existingByKey.sale), created: false };
+        }
+      }
+
       const sale = await tx.sale.findUnique({
         where: { id: input.saleId },
         include: { lines: { include: { product: true } }, customer: true },
@@ -140,16 +166,31 @@ export class InvoicingRepository {
       const sequenceNumber = rows[0]!.last_number;
       const number = `FACT-${enterpriseId.slice(0, 8).toUpperCase()}-${String(sequenceNumber).padStart(6, "0")}`;
 
-      const invoice = await tx.salesInvoice.create({
-        data: {
-          enterpriseId,
-          saleId: sale.id,
-          number,
-          legalMentions: buildLegalMentions(enterprise, sale.customer),
-        },
-      });
+      try {
+        const invoice = await tx.salesInvoice.create({
+          data: {
+            enterpriseId,
+            saleId: sale.id,
+            number,
+            legalMentions: buildLegalMentions(enterprise, sale.customer),
+            idempotencyKey: idempotencyKey ?? null,
+          },
+        });
 
-      return this.toInvoiceView(invoice, sale);
+        return { view: this.toInvoiceView(invoice, sale), created: true };
+      } catch (error) {
+        // Filet de concurrence, même patron que SalesRepository.create.
+        if (idempotencyKey && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+          const existingByKey = await tx.salesInvoice.findFirst({
+            where: { enterpriseId, idempotencyKey },
+            include: { sale: { include: { lines: { include: { product: true } }, customer: true } } },
+          });
+          if (existingByKey) {
+            return { view: this.toInvoiceView(existingByKey, existingByKey.sale), created: false };
+          }
+        }
+        throw error;
+      }
     });
   }
 

@@ -718,11 +718,16 @@ model Purchase {
   confirmedAt  DateTime?      @map("confirmed_at")
   cancelledAt  DateTime?      @map("cancelled_at")
 
+  // Corrige MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) — même patron que
+  // Sale.idempotencyKey.
+  idempotencyKey String? @map("idempotency_key")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   lines PurchaseLine[]
 
+  @@unique([enterpriseId, idempotencyKey])
   @@index([enterpriseId])
   @@index([enterpriseId, status])
   @@map("purchases")
@@ -794,9 +799,15 @@ model SalesInvoice {
   // l'entreprise ou du client ne doit jamais altérer une facture déjà émise.
   legalMentions String        @map("legal_mentions")
 
+  // Corrige MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) — même patron que
+  // Sale.idempotencyKey. Distinct de la contrainte @unique sur saleId : deux
+  // protections indépendantes (une facture par vente ; un rejeu par clé).
+  idempotencyKey String? @map("idempotency_key")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  @@unique([enterpriseId, idempotencyKey])
   @@index([enterpriseId])
   @@index([enterpriseId, status])
   @@map("sales_invoices")

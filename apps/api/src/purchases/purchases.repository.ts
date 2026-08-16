@@ -56,6 +56,13 @@ export interface PurchaseListResult {
   pageSize: number;
 }
 
+// `created: false` signale un rejeu déduplié (docs/adr/0019-...) — même
+// patron que CreateSaleResult.
+export interface CreatePurchaseResult {
+  view: PurchaseView;
+  created: boolean;
+}
+
 function lineTotals(quantity: number, unitCostExcludingTax: number, vatRateBasisPoints: number) {
   const lineTotalExcludingTax = quantity * unitCostExcludingTax;
   const lineTotalVat = Math.round((lineTotalExcludingTax * vatRateBasisPoints) / 10_000);
@@ -73,8 +80,24 @@ export class PurchasesRepository {
     private readonly stockRepository: StockRepository,
   ) {}
 
-  async create(enterpriseId: string, input: CreatePurchaseInput): Promise<PurchaseView> {
+  async create(
+    enterpriseId: string,
+    input: CreatePurchaseInput,
+    idempotencyKey?: string,
+  ): Promise<CreatePurchaseResult> {
     return this.tenantPrisma.run(async (tx) => {
+      // Corrige MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) — même patron
+      // que SalesRepository.create.
+      if (idempotencyKey) {
+        const existing = await tx.purchase.findFirst({
+          where: { enterpriseId, idempotencyKey },
+          include: { lines: { include: { product: true } }, supplier: true },
+        });
+        if (existing) {
+          return { view: this.toPurchaseView(existing), created: false };
+        }
+      }
+
       const supplier = await tx.supplier.findUnique({ where: { id: input.supplierId } });
       if (!supplier || supplier.enterpriseId !== enterpriseId) {
         throw new NotFoundException("Fournisseur introuvable");
@@ -91,28 +114,42 @@ export class PurchasesRepository {
         }
       }
 
-      const purchase = await tx.purchase.create({
-        data: {
-          enterpriseId,
-          supplierId: input.supplierId,
-          notes: input.notes,
-          lines: {
-            create: input.lines.map((line) => {
-              const product = productsById.get(line.productId)!;
-              return {
-                enterpriseId,
-                productId: line.productId,
-                quantity: line.quantity,
-                unitCostExcludingTax: line.unitCostExcludingTax,
-                vatRateBasisPoints: product.vatRateBasisPoints,
-              };
-            }),
+      try {
+        const purchase = await tx.purchase.create({
+          data: {
+            enterpriseId,
+            supplierId: input.supplierId,
+            notes: input.notes,
+            idempotencyKey: idempotencyKey ?? null,
+            lines: {
+              create: input.lines.map((line) => {
+                const product = productsById.get(line.productId)!;
+                return {
+                  enterpriseId,
+                  productId: line.productId,
+                  quantity: line.quantity,
+                  unitCostExcludingTax: line.unitCostExcludingTax,
+                  vatRateBasisPoints: product.vatRateBasisPoints,
+                };
+              }),
+            },
           },
-        },
-        include: { lines: { include: { product: true } }, supplier: true },
-      });
+          include: { lines: { include: { product: true } }, supplier: true },
+        });
 
-      return this.toPurchaseView(purchase);
+        return { view: this.toPurchaseView(purchase), created: true };
+      } catch (error) {
+        if (idempotencyKey && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+          const existing = await tx.purchase.findFirst({
+            where: { enterpriseId, idempotencyKey },
+            include: { lines: { include: { product: true } }, supplier: true },
+          });
+          if (existing) {
+            return { view: this.toPurchaseView(existing), created: false };
+          }
+        }
+        throw error;
+      }
     });
   }
 

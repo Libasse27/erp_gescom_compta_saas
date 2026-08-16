@@ -142,13 +142,17 @@ describe("ReportsRepository", () => {
     const supplier = await createSupplier(enterprise.id);
     const product = await createProduct(enterprise.id);
 
-    const confirmedPurchase = await asTenant(enterprise.id, () =>
+    // PurchasesRepository.create() renvoie désormais { view, created }
+    // (docs/adr/0019-...) : seul l'achat (view) intéresse cette fixture.
+    const {
+      view: { id: confirmedPurchaseId },
+    } = await asTenant(enterprise.id, () =>
       purchasesRepository.create(enterprise.id, {
         supplierId: supplier.id,
         lines: [{ productId: product.id, quantity: 3, unitCostExcludingTax: 500 }],
       }),
     );
-    await asTenant(enterprise.id, () => purchasesRepository.confirm(enterprise.id, confirmedPurchase.id));
+    await asTenant(enterprise.id, () => purchasesRepository.confirm(enterprise.id, confirmedPurchaseId));
 
     const report = await asTenant(enterprise.id, () =>
       repository.purchasesReport(enterprise.id, { dateFrom: undefined, dateTo: undefined }),

@@ -153,6 +153,37 @@ describe("PurchasesController (integration)", () => {
     expect(quantityOnHand).toBe(4);
   });
 
+  // Régression MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) — même patron
+  // que sales.integration.spec.ts.
+  it("returns the same purchase on a replayed POST /purchases carrying the same Idempotency-Key header", async () => {
+    const { accessToken, enterpriseId } = await setupTenant(["purchases.read", "purchases.create"]);
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const supplier = await createSupplier(enterpriseId);
+    const product = await createProduct(enterpriseId);
+    const idempotencyKey = randomUUID();
+
+    const body = { supplierId: supplier.id, lines: [{ productId: product.id, quantity: 2, unitCostExcludingTax: 500 }] };
+
+    const firstRes = await request(app.getHttpServer())
+      .post("/purchases")
+      .set(auth)
+      .set("Idempotency-Key", idempotencyKey)
+      .send(body)
+      .expect(201);
+
+    const secondRes = await request(app.getHttpServer())
+      .post("/purchases")
+      .set(auth)
+      .set("Idempotency-Key", idempotencyKey)
+      .send(body)
+      .expect(201);
+
+    expect(secondRes.body.id).toBe(firstRes.body.id);
+
+    const purchases = await prisma.purchase.findMany({ where: { enterpriseId, supplierId: supplier.id } });
+    expect(purchases).toHaveLength(1);
+  });
+
   it("rejects invalid input (400): empty lines array", async () => {
     const { accessToken, enterpriseId } = await setupTenant(["purchases.create"]);
     const supplier = await createSupplier(enterpriseId);

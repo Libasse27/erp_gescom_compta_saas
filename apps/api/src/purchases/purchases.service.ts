@@ -24,18 +24,22 @@ export class PurchasesService {
     userId: string,
     input: CreatePurchaseInput,
     meta: RequestMetadata,
+    idempotencyKey?: string,
   ): Promise<PurchaseView> {
-    const purchase = await this.purchasesRepository.create(enterpriseId, input);
+    const { view: purchase, created } = await this.purchasesRepository.create(enterpriseId, input, idempotencyKey);
 
-    await this.auditLog.record({
-      userId,
-      enterpriseId,
-      action: "CREATE_PURCHASE",
-      resource: "Purchase",
-      resourceId: purchase.id,
-      ipAddress: meta.ipAddress,
-      userAgent: meta.userAgent,
-    });
+    // Un rejeu dédupliqué (docs/adr/0019-...) n'a produit aucune écriture.
+    if (created) {
+      await this.auditLog.record({
+        userId,
+        enterpriseId,
+        action: "CREATE_PURCHASE",
+        resource: "Purchase",
+        resourceId: purchase.id,
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
+    }
 
     return purchase;
   }

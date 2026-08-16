@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { Request } from "express";
 import { createPurchaseSchema, CreatePurchaseInput, listPurchasesQuerySchema, ListPurchasesQuery } from "@erp/validation";
 import { ZodValidationPipe } from "../common/validation/zod-validation.pipe";
@@ -49,8 +49,10 @@ export class PurchasesController {
     @Body(new ZodValidationPipe(createPurchaseSchema)) body: CreatePurchaseInput,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
+    // Corrige MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...).
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
-    return this.purchasesService.create(user.enterpriseId as string, user.id, body, requestMeta(req));
+    return this.purchasesService.create(user.enterpriseId as string, user.id, body, requestMeta(req), idempotencyKey);
   }
 
   @Post(":id/confirm")

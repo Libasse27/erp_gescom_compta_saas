@@ -24,18 +24,22 @@ export class InvoicingService {
     userId: string,
     input: CreateSalesInvoiceInput,
     meta: RequestMetadata,
+    idempotencyKey?: string,
   ): Promise<SalesInvoiceView> {
-    const invoice = await this.invoicingRepository.create(enterpriseId, input);
+    const { view: invoice, created } = await this.invoicingRepository.create(enterpriseId, input, idempotencyKey);
 
-    await this.auditLog.record({
-      userId,
-      enterpriseId,
-      action: "CREATE_INVOICE",
-      resource: "SalesInvoice",
-      resourceId: invoice.id,
-      ipAddress: meta.ipAddress,
-      userAgent: meta.userAgent,
-    });
+    // Un rejeu dédupliqué (docs/adr/0019-...) n'a produit aucune écriture.
+    if (created) {
+      await this.auditLog.record({
+        userId,
+        enterpriseId,
+        action: "CREATE_INVOICE",
+        resource: "SalesInvoice",
+        resourceId: invoice.id,
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
+    }
 
     return invoice;
   }
