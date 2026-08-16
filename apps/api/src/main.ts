@@ -1,9 +1,10 @@
 import helmet from "helmet";
 import { NestFactory } from "@nestjs/core";
-import { RequestMethod } from "@nestjs/common";
+import { Logger, RequestMethod } from "@nestjs/common";
 import { AppModule } from "./app.module";
 import { env } from "./config/env";
 import { StructuredLoggerService } from "./common/logging/structured-logger.service";
+import { MAIL_SENDER, ConsoleMailSender } from "./notifications/mail-sender";
 
 async function bootstrap() {
   // rawBody: true expose req.rawBody (Buffer exact reçu sur le fil) sans
@@ -14,6 +15,21 @@ async function bootstrap() {
   // bootstrap (Phase 10.5) — tout `new Logger(context)` de l'application,
   // y compris les messages internes de démarrage Nest, passe par lui.
   const app = await NestFactory.create(AppModule, { rawBody: true, logger: new StructuredLoggerService() });
+
+  // Corrige SEC-04 (docs/audit/SECURITY-AUDIT.md) : aucune intégration SMTP
+  // réelle n'existe encore (Phase 24 du prompt maître) — ConsoleMailSender
+  // reste donc branché en production tant que ce chantier n'est pas fait.
+  // Avertissement fort plutôt qu'un refus de démarrage strict : le
+  // déploiement documenté (scripts/prod-post-deploy.sh) ne configure encore
+  // aucun expéditeur réel, un fail-closed casserait le seul chemin de
+  // déploiement existant sans offrir d'alternative.
+  if (process.env.NODE_ENV === "production" && app.get(MAIL_SENDER) instanceof ConsoleMailSender) {
+    new Logger("Bootstrap").warn(
+      "Aucun expéditeur d'email réel configuré (MAIL_SENDER = ConsoleMailSender) : " +
+        "la réinitialisation de mot de passe, la vérification d'email et les invitations " +
+        "n'envoient aucun courriel réel en production.",
+    );
+  }
 
   app.use(helmet());
   // Liste blanche stricte, jamais "*" (CLAUDE.md §6). credentials:true
