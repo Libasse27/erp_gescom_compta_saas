@@ -157,6 +157,38 @@ describe("SalesController (integration)", () => {
     expect(quantityOnHand).toBe(6); // 10 reçus - 4 vendus
   });
 
+  // Régression MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) : au niveau
+  // HTTP, un POST /sales rejoué avec le même en-tête Idempotency-Key doit
+  // renvoyer la même vente, jamais en créer une seconde.
+  it("returns the same sale on a replayed POST /sales carrying the same Idempotency-Key header", async () => {
+    const { accessToken, enterpriseId } = await setupTenant(["sales.read", "sales.create"]);
+    const auth = { Authorization: `Bearer ${accessToken}` };
+    const customer = await createCustomer(enterpriseId);
+    const product = await createProduct(enterpriseId);
+    const idempotencyKey = randomUUID();
+
+    const body = { customerId: customer.id, lines: [{ productId: product.id, quantity: 2 }] };
+
+    const firstRes = await request(app.getHttpServer())
+      .post("/sales")
+      .set(auth)
+      .set("Idempotency-Key", idempotencyKey)
+      .send(body)
+      .expect(201);
+
+    const secondRes = await request(app.getHttpServer())
+      .post("/sales")
+      .set(auth)
+      .set("Idempotency-Key", idempotencyKey)
+      .send(body)
+      .expect(201);
+
+    expect(secondRes.body.id).toBe(firstRes.body.id);
+
+    const sales = await prisma.sale.findMany({ where: { enterpriseId, customerId: customer.id } });
+    expect(sales).toHaveLength(1);
+  });
+
   it("rejects confirming a sale when stock is insufficient (409)", async () => {
     const { accessToken, enterpriseId } = await setupTenant(["sales.create", "sales.update"]);
     const auth = { Authorization: `Bearer ${accessToken}` };

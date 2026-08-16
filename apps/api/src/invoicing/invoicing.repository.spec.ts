@@ -75,7 +75,9 @@ describe("InvoicingRepository", () => {
   async function createConfirmedSale(enterpriseId: string, quantity = 2) {
     const customer = await createCustomer(enterpriseId);
     const product = await createProduct(enterpriseId);
-    const sale = await asTenant(enterpriseId, () =>
+    // SalesRepository.create() renvoie désormais { view, created }
+    // (docs/adr/0019-...) : seule la vente (view) intéresse ces fixtures.
+    const { view: sale } = await asTenant(enterpriseId, () =>
       salesRepository.create(enterpriseId, { customerId: customer.id, lines: [{ productId: product.id, quantity }] }),
     );
     return asTenant(enterpriseId, () => salesRepository.confirm(enterpriseId, sale.id));
@@ -84,9 +86,10 @@ describe("InvoicingRepository", () => {
   async function createDraftSale(enterpriseId: string) {
     const customer = await createCustomer(enterpriseId);
     const product = await createProduct(enterpriseId);
-    return asTenant(enterpriseId, () =>
+    const { view: sale } = await asTenant(enterpriseId, () =>
       salesRepository.create(enterpriseId, { customerId: customer.id, lines: [{ productId: product.id, quantity: 1 }] }),
     );
+    return sale;
   }
 
   it("issues an invoice for a CONFIRMED sale, matching its totals, with a sequential number", async () => {

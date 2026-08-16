@@ -92,10 +92,14 @@ describe("ReportsRepository", () => {
     const customer = await createCustomer(enterprise.id);
     const product = await createProduct(enterprise.id);
 
-    const confirmedSale = await asTenant(enterprise.id, () =>
+    // SalesRepository.create() renvoie désormais { view, created }
+    // (docs/adr/0019-...) : seule la vente (view) intéresse ces fixtures.
+    const {
+      view: { id: confirmedSaleId },
+    } = await asTenant(enterprise.id, () =>
       salesRepository.create(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 2 }] }),
     );
-    await asTenant(enterprise.id, () => salesRepository.confirm(enterprise.id, confirmedSale.id));
+    await asTenant(enterprise.id, () => salesRepository.confirm(enterprise.id, confirmedSaleId));
 
     // Vente DRAFT : ne doit jamais apparaître dans le rapport.
     await asTenant(enterprise.id, () =>
@@ -119,7 +123,7 @@ describe("ReportsRepository", () => {
     const customer = await createCustomer(enterprise.id);
     const product = await createProduct(enterprise.id);
 
-    const sale = await asTenant(enterprise.id, () =>
+    const { view: sale } = await asTenant(enterprise.id, () =>
       salesRepository.create(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 1 }] }),
     );
     await asTenant(enterprise.id, () => salesRepository.confirm(enterprise.id, sale.id));

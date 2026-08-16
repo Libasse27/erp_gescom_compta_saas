@@ -640,12 +640,20 @@ model Sale {
   confirmedAt DateTime?  @map("confirmed_at")
   cancelledAt DateTime?  @map("cancelled_at")
 
+  // Corrige MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) : clé de
+  // déduplication fournie par l'appelant (en-tête Idempotency-Key), jamais
+  // un identifiant métier. Nullable : une création sans clé (ex. apps/web)
+  // n'est jamais bloquée par des NULL répétés — Postgres ne considère
+  // jamais deux NULL comme égaux dans une contrainte UNIQUE.
+  idempotencyKey String? @map("idempotency_key")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   lines   SaleLine[]
   invoice SalesInvoice?
 
+  @@unique([enterpriseId, idempotencyKey])
   @@index([enterpriseId])
   @@index([enterpriseId, status])
   @@map("sales")

@@ -1,7 +1,7 @@
 # 0019 — Clé d'idempotence pour les créations financières rejouées depuis la file mobile hors-ligne
 
 ## Statut
-Proposé — 2026-08-16 (corrige MOBILE AUDIT-001 / ERP-001,
+Tranché — 2026-08-16 (corrige MOBILE AUDIT-001 / ERP-001,
 `docs/audit/MOBILE-AUDIT.md`, `docs/audit/ERP-AUDIT.md`)
 
 ## Contexte

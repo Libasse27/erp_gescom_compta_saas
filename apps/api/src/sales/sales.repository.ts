@@ -58,6 +58,15 @@ export interface SaleListResult {
   pageSize: number;
 }
 
+// `created: false` signale un rejeu déduplié (docs/adr/0019-...) : le
+// contrôleur renvoie quand même 201 (indiscernable d'un premier succès pour
+// l'appelant), mais le service ne doit pas ré-émettre d'entrée d'audit log
+// pour une écriture qui n'a pas eu lieu.
+export interface CreateSaleResult {
+  view: SaleView;
+  created: boolean;
+}
+
 function lineTotals(quantity: number, unitPriceExcludingTax: number, vatRateBasisPoints: number) {
   const lineTotalExcludingTax = quantity * unitPriceExcludingTax;
   const lineTotalVat = Math.round((lineTotalExcludingTax * vatRateBasisPoints) / 10_000);
@@ -75,8 +84,23 @@ export class SalesRepository {
     private readonly stockRepository: StockRepository,
   ) {}
 
-  async create(enterpriseId: string, input: CreateSaleInput): Promise<SaleView> {
+  async create(enterpriseId: string, input: CreateSaleInput, idempotencyKey?: string): Promise<CreateSaleResult> {
     return this.tenantPrisma.run(async (tx) => {
+      // Corrige MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) : un rejeu de
+      // la file hors-ligne mobile (réponse perdue après un succès serveur)
+      // ne doit jamais créer une deuxième vente. Recherche d'abord, avant
+      // toute validation client/produit — un rejeu ne doit pas échouer si
+      // le client a entre-temps été désactivé, par exemple.
+      if (idempotencyKey) {
+        const existing = await tx.sale.findFirst({
+          where: { enterpriseId, idempotencyKey },
+          include: { lines: { include: { product: true } }, customer: true },
+        });
+        if (existing) {
+          return { view: this.toSaleView(existing), created: false };
+        }
+      }
+
       const customer = await tx.customer.findUnique({ where: { id: input.customerId } });
       if (!customer || customer.enterpriseId !== enterpriseId) {
         throw new NotFoundException("Client introuvable");
@@ -93,28 +117,47 @@ export class SalesRepository {
         }
       }
 
-      const sale = await tx.sale.create({
-        data: {
-          enterpriseId,
-          customerId: input.customerId,
-          notes: input.notes,
-          lines: {
-            create: input.lines.map((line) => {
-              const product = productsById.get(line.productId)!;
-              return {
-                enterpriseId,
-                productId: line.productId,
-                quantity: line.quantity,
-                unitPriceExcludingTax: product.sellingPriceExcludingTax,
-                vatRateBasisPoints: product.vatRateBasisPoints,
-              };
-            }),
+      try {
+        const sale = await tx.sale.create({
+          data: {
+            enterpriseId,
+            customerId: input.customerId,
+            notes: input.notes,
+            idempotencyKey: idempotencyKey ?? null,
+            lines: {
+              create: input.lines.map((line) => {
+                const product = productsById.get(line.productId)!;
+                return {
+                  enterpriseId,
+                  productId: line.productId,
+                  quantity: line.quantity,
+                  unitPriceExcludingTax: product.sellingPriceExcludingTax,
+                  vatRateBasisPoints: product.vatRateBasisPoints,
+                };
+              }),
+            },
           },
-        },
-        include: { lines: { include: { product: true } }, customer: true },
-      });
+          include: { lines: { include: { product: true } }, customer: true },
+        });
 
-      return this.toSaleView(sale);
+        return { view: this.toSaleView(sale), created: true };
+      } catch (error) {
+        // Filet de concurrence : deux rejeux quasi simultanés de la même
+        // mutation hors-ligne perdent la course au findFirst ci-dessus mais
+        // pas à la contrainte unique — le perdant récupère la vente créée
+        // par le gagnant plutôt que de propager une erreur (même patron que
+        // journal_entry_counters via ON CONFLICT).
+        if (idempotencyKey && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+          const existing = await tx.sale.findFirst({
+            where: { enterpriseId, idempotencyKey },
+            include: { lines: { include: { product: true } }, customer: true },
+          });
+          if (existing) {
+            return { view: this.toSaleView(existing), created: false };
+          }
+        }
+        throw error;
+      }
     });
   }
 

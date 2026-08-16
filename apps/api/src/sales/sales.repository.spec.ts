@@ -66,13 +66,25 @@ describe("SalesRepository", () => {
     );
   }
 
+  // create() renvoie désormais { view, created } (docs/adr/0019-...) : ce
+  // dépouilleur garde la majorité des tests, qui ne s'intéressent qu'à la
+  // vente, lisibles sans changement supplémentaire.
+  async function createSale(
+    enterpriseId: string,
+    input: Parameters<SalesRepository["create"]>[1],
+    idempotencyKey?: string,
+  ) {
+    const { view } = await repository.create(enterpriseId, input, idempotencyKey);
+    return view;
+  }
+
   it("creates a DRAFT sale, snapshotting the product's price/VAT and computing totals", async () => {
     const enterprise = await createEnterprise();
     const customer = await createCustomer(enterprise.id);
     const product = await createProduct(enterprise.id, { price: 1_000 });
 
     const sale = await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 3 }] }),
+      createSale(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 3 }] }),
     );
 
     expect(sale.status).toBe("DRAFT");
@@ -93,7 +105,7 @@ describe("SalesRepository", () => {
     const product = await createProduct(enterprise.id, { price: 1_000 });
 
     const sale = await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 1 }] }),
+      createSale(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 1 }] }),
     );
 
     await asTenant(enterprise.id, () =>
@@ -114,14 +126,14 @@ describe("SalesRepository", () => {
     );
 
     const shortSale = await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 10 }] }),
+      createSale(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 10 }] }),
     );
     await expect(asTenant(enterprise.id, () => repository.confirm(enterprise.id, shortSale.id))).rejects.toThrow(
       ConflictException,
     );
 
     const okSale = await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 5 }] }),
+      createSale(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 5 }] }),
     );
     const confirmed = await asTenant(enterprise.id, () => repository.confirm(enterprise.id, okSale.id));
     expect(confirmed.status).toBe("CONFIRMED");
@@ -136,7 +148,7 @@ describe("SalesRepository", () => {
     const product = await createProduct(enterprise.id, { trackStock: false });
 
     const sale = await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 100 }] }),
+      createSale(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 100 }] }),
     );
 
     const confirmed = await asTenant(enterprise.id, () => repository.confirm(enterprise.id, sale.id));
@@ -149,7 +161,7 @@ describe("SalesRepository", () => {
     const product = await createProduct(enterprise.id, { trackStock: false });
 
     const sale = await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 1 }] }),
+      createSale(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 1 }] }),
     );
     await asTenant(enterprise.id, () => repository.confirm(enterprise.id, sale.id));
 
@@ -164,13 +176,13 @@ describe("SalesRepository", () => {
     const product = await createProduct(enterprise.id, { trackStock: false });
 
     const draft = await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 1 }] }),
+      createSale(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 1 }] }),
     );
     const cancelled = await asTenant(enterprise.id, () => repository.cancel(enterprise.id, draft.id));
     expect(cancelled.status).toBe("CANCELLED");
 
     const confirmedSale = await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 1 }] }),
+      createSale(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 1 }] }),
     );
     await asTenant(enterprise.id, () => repository.confirm(enterprise.id, confirmedSale.id));
 
@@ -187,9 +199,50 @@ describe("SalesRepository", () => {
 
     await expect(
       asTenant(enterpriseA.id, () =>
-        repository.create(enterpriseA.id, { customerId: customerA.id, lines: [{ productId: productB.id, quantity: 1 }] }),
+        createSale(enterpriseA.id, { customerId: customerA.id, lines: [{ productId: productB.id, quantity: 1 }] }),
       ),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  // Régression MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) : la file
+  // hors-ligne mobile rejoue une mutation à l'identique quand la réponse
+  // serveur d'un succès est perdue (timeout, coupure réseau).
+  it("returns the same sale without creating a duplicate when the same idempotency key is replayed", async () => {
+    const enterprise = await createEnterprise();
+    const customer = await createCustomer(enterprise.id);
+    const product = await createProduct(enterprise.id);
+    const key = randomUUID();
+
+    const first = await asTenant(enterprise.id, () =>
+      repository.create(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 2 }] }, key),
+    );
+    const second = await asTenant(enterprise.id, () =>
+      repository.create(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 2 }] }, key),
+    );
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.view.id).toBe(first.view.id);
+
+    const sales = await prisma.sale.findMany({ where: { enterpriseId: enterprise.id } });
+    expect(sales).toHaveLength(1);
+  });
+
+  it("creates two distinct sales when the idempotency key differs", async () => {
+    const enterprise = await createEnterprise();
+    const customer = await createCustomer(enterprise.id);
+    const product = await createProduct(enterprise.id);
+
+    const first = await asTenant(enterprise.id, () =>
+      createSale(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 1 }] }, randomUUID()),
+    );
+    const second = await asTenant(enterprise.id, () =>
+      createSale(enterprise.id, { customerId: customer.id, lines: [{ productId: product.id, quantity: 1 }] }, randomUUID()),
+    );
+
+    expect(first.id).not.toBe(second.id);
+    const sales = await prisma.sale.findMany({ where: { enterpriseId: enterprise.id } });
+    expect(sales).toHaveLength(2);
   });
 
   it("throws NotFoundException when reading a sale that belongs to another enterprise", async () => {
@@ -199,7 +252,7 @@ describe("SalesRepository", () => {
     const productB = await createProduct(enterpriseB.id);
 
     const saleB = await asTenant(enterpriseB.id, () =>
-      repository.create(enterpriseB.id, { customerId: customerB.id, lines: [{ productId: productB.id, quantity: 1 }] }),
+      createSale(enterpriseB.id, { customerId: customerB.id, lines: [{ productId: productB.id, quantity: 1 }] }),
     );
 
     await expect(asTenant(enterpriseA.id, () => repository.findByIdOrThrow(enterpriseA.id, saleB.id))).rejects.toThrow(

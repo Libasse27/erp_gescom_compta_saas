@@ -24,18 +24,23 @@ export class SalesService {
     userId: string,
     input: CreateSaleInput,
     meta: RequestMetadata,
+    idempotencyKey?: string,
   ): Promise<SaleView> {
-    const sale = await this.salesRepository.create(enterpriseId, input);
+    const { view: sale, created } = await this.salesRepository.create(enterpriseId, input, idempotencyKey);
 
-    await this.auditLog.record({
-      userId,
-      enterpriseId,
-      action: "CREATE_SALE",
-      resource: "Sale",
-      resourceId: sale.id,
-      ipAddress: meta.ipAddress,
-      userAgent: meta.userAgent,
-    });
+    // Un rejeu dédupliqué (docs/adr/0019-...) n'a produit aucune écriture :
+    // pas de nouvelle entrée d'audit log pour une création qui n'a pas eu lieu.
+    if (created) {
+      await this.auditLog.record({
+        userId,
+        enterpriseId,
+        action: "CREATE_SALE",
+        resource: "Sale",
+        resourceId: sale.id,
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
+    }
 
     return sale;
   }
