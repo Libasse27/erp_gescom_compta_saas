@@ -25,12 +25,36 @@ const desktopRoot = path.join(__dirname, "..");
 const monorepoRoot = path.join(desktopRoot, "..", "..");
 const webDistDir = path.join(desktopRoot, "web-dist");
 
-function run(command, cwd) {
+function run(command, cwd, extraEnv = {}) {
   console.log(`[package] ${command}`);
-  execSync(command, { cwd, stdio: "inherit", shell: true });
+  execSync(command, { cwd, stdio: "inherit", shell: true, env: { ...process.env, ...extraEnv } });
 }
 
-run("pnpm --filter web build", monorepoRoot);
+// Corrige D-01 (docs/audit/DESKTOP-AUDIT.md) : NEXT_PUBLIC_API_URL est
+// inlinée dans le bundle JavaScript au moment du build Next.js (comme toute
+// variable NEXT_PUBLIC_*), jamais lue au runtime — sans ce garde-fou, ce
+// script buildait silencieusement avec le défaut de développement
+// (http://localhost:3000, voir apps/web/src/lib/api.ts), rendant tout
+// paquet inutilisable hors du poste où il a été construit. Contrairement à
+// apps/web/Dockerfile (qui documente déjà ce piège via --build-arg),
+// aucune valeur de repli n'est fournie ici : le projet n'a pas encore de
+// domaine de production réel (docker/.env.prod.example utilise encore le
+// placeholder "https://api.change-me.example") — un défaut inventé serait
+// aussi silencieusement trompeur qu'un défaut localhost. À l'opérateur de
+// fournir explicitement l'URL de l'API visée par ce paquet.
+const DESKTOP_API_URL = process.env.DESKTOP_API_URL;
+if (!DESKTOP_API_URL) {
+  console.error(
+    "[package] DESKTOP_API_URL manquant. L'URL de l'API NestJS que ce paquet " +
+      "doit contacter n'a jamais de valeur par défaut (corrige D-01, " +
+      "docs/audit/DESKTOP-AUDIT.md) : un défaut localhost ou inventé produirait " +
+      "silencieusement un paquet inutilisable hors du poste de build.\n" +
+      '  Exemple : DESKTOP_API_URL="https://api.mondomaine.example" pnpm --filter @erp/desktop package',
+  );
+  process.exit(1);
+}
+
+run("pnpm --filter web build", monorepoRoot, { NEXT_PUBLIC_API_URL: DESKTOP_API_URL });
 
 fs.rmSync(webDistDir, { recursive: true, force: true });
 run(`pnpm --filter web deploy "${webDistDir}" --prod ${NODE_LINKER}`, monorepoRoot);

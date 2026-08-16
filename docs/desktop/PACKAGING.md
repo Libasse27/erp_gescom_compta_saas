@@ -134,7 +134,9 @@ Pour confirmer qu'un paquet démarre réellement (pas seulement qu'il se
 construit sans erreur) :
 
 ```bash
-pnpm --filter @erp/desktop package
+# DESKTOP_API_URL obligatoire depuis la correction de D-01
+# (docs/audit/DESKTOP-AUDIT.md) — voir apps/desktop/README.md.
+DESKTOP_API_URL="https://api.mondomaine.example" pnpm --filter @erp/desktop package
 # puis, depuis apps/desktop/release/win-unpacked :
 ./"ERP Gescom Compta.exe"
 # vérifier dans les logs : "✓ Ready in Xs" (pas d'erreur next.config)

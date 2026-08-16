@@ -58,7 +58,22 @@ cette URL pour produire un paquet visant un environnement différent
 un mécanisme de configuration post-build (fichier de config lu au runtime par
 le process principal Electron plutôt qu'une valeur inlinée).
 **Priorité** : P0 — bloquant avant toute distribution, même interne.
-**Statut** : OUVERT
+**Statut** : PARTIELLEMENT CORRIGÉ (2026-08-16) — `scripts/package.js` exige
+désormais `DESKTOP_API_URL` et échoue immédiatement (avant tout build) s'il
+est absent, plutôt que de retomber silencieusement sur le défaut de
+développement (`http://localhost:3000`). Écart assumé par rapport à la
+solution suggérée : pas de valeur par défaut pointant vers une API de
+production réelle — le projet n'a pas encore de domaine de production
+(`docker/.env.prod.example` utilise encore `https://api.change-me.example`),
+un défaut inventé aurait été aussi trompeur que `localhost`. Documenté dans
+`apps/desktop/README.md` et `docs/desktop/PACKAGING.md`. Le mécanisme de
+configuration post-build (fichier lu au runtime par Electron, pour packager
+une seule fois et cibler plusieurs environnements) n'est pas traité — reste
+un correctif au moment du build, à revisiter si plusieurs environnements
+cibles deviennent nécessaires. D-04 (aucune vérification fonctionnelle sur
+poste propre) reste également ouvert : ce correctif n'a été vérifié que par
+l'échec rapide sans variable, pas par un paquet réel testé contre une API
+distante.
 
 ---
 

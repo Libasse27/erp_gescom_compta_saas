@@ -42,5 +42,11 @@ start` déployé sans pnpm — voir « Packaging » ci-dessous.
 pnpm --filter web build         # apps/web doit être construit avant `pnpm dev`
 pnpm --filter @erp/desktop dev
 pnpm --filter @erp/desktop test
-pnpm --filter @erp/desktop package   # voir docs/desktop/PACKAGING.md — web-dist actuellement non fonctionnel
+
+# DESKTOP_API_URL obligatoire (corrige D-01, docs/audit/DESKTOP-AUDIT.md) :
+# NEXT_PUBLIC_API_URL est inlinée dans le bundle Next.js au moment du build,
+# jamais lue au runtime — sans cette variable, le paquet pointerait
+# irrévocablement vers l'API du poste de build. Aucun défaut : à fournir
+# explicitement pour chaque environnement cible (staging/prod).
+DESKTOP_API_URL="https://api.mondomaine.example" pnpm --filter @erp/desktop package
 ```
