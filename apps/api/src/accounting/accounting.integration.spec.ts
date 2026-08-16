@@ -153,6 +153,53 @@ describe("AccountingController (integration)", () => {
     expect(bankBalance.balance).toBe(15_000);
   });
 
+  // Régression MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) — même patron
+  // que sales.integration.spec.ts.
+  it("returns the same entry on a replayed POST /accounting/journal-entries carrying the same Idempotency-Key header", async () => {
+    const { accessToken } = await setupTenant(["accounting.create", "accounting.read"]);
+    const auth = { Authorization: `Bearer ${accessToken}` };
+
+    const bankRes = await request(app.getHttpServer())
+      .post("/accounting/accounts")
+      .set(auth)
+      .send({ code: "521000", label: "Banque" })
+      .expect(201);
+    const salesRes = await request(app.getHttpServer())
+      .post("/accounting/accounts")
+      .set(auth)
+      .send({ code: "701000", label: "Ventes" })
+      .expect(201);
+    const idempotencyKey = randomUUID();
+    const body = {
+      description: "Vente au comptant",
+      lines: [
+        { accountId: bankRes.body.id, debitAmount: 2_000, creditAmount: 0 },
+        { accountId: salesRes.body.id, debitAmount: 0, creditAmount: 2_000 },
+      ],
+    };
+
+    const firstRes = await request(app.getHttpServer())
+      .post("/accounting/journal-entries")
+      .set(auth)
+      .set("Idempotency-Key", idempotencyKey)
+      .send(body)
+      .expect(201);
+
+    const secondRes = await request(app.getHttpServer())
+      .post("/accounting/journal-entries")
+      .set(auth)
+      .set("Idempotency-Key", idempotencyKey)
+      .send(body)
+      .expect(201);
+
+    expect(secondRes.body.id).toBe(firstRes.body.id);
+    expect(secondRes.body.number).toBe(firstRes.body.number);
+
+    const listRes = await request(app.getHttpServer()).get("/accounting/journal-entries").set(auth).expect(200);
+    const matching = listRes.body.items.filter((e: { id: string }) => e.id === firstRes.body.id);
+    expect(matching).toHaveLength(1);
+  });
+
   it("rejects creating an account with a code already used in the same tenant (409)", async () => {
     const { accessToken } = await setupTenant(["accounting.create"]);
     const auth = { Authorization: `Bearer ${accessToken}` };

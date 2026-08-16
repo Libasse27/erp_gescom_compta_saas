@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { Request } from "express";
 import {
   createJournalEntrySchema,
@@ -54,7 +54,9 @@ export class JournalController {
     @Body(new ZodValidationPipe(createJournalEntrySchema)) body: CreateJournalEntryInput,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
+    // Corrige MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...).
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
-    return this.journalService.create(user.enterpriseId as string, user.id, body, requestMeta(req));
+    return this.journalService.create(user.enterpriseId as string, user.id, body, requestMeta(req), idempotencyKey);
   }
 }

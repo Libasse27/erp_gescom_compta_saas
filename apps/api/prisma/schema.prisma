@@ -399,11 +399,16 @@ model JournalEntry {
   reference   String?
   description String
 
+  // Corrige MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) — même patron que
+  // Sale.idempotencyKey.
+  idempotencyKey String? @map("idempotency_key")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   lines JournalEntryLine[]
 
+  @@unique([enterpriseId, idempotencyKey])
   @@index([enterpriseId])
   @@index([enterpriseId, entryDate])
   @@map("journal_entries")

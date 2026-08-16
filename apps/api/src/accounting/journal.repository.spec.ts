@@ -45,13 +45,25 @@ describe("JournalRepository", () => {
     return asTenant(enterpriseId, () => accountsRepository.create(enterpriseId, { code, label: "Compte test" }));
   }
 
+  // create() renvoie désormais { view, created } (docs/adr/0019-...) : ce
+  // dépouilleur garde la majorité des tests lisibles sans changement
+  // supplémentaire.
+  async function createEntry(
+    enterpriseId: string,
+    input: Parameters<JournalRepository["create"]>[1],
+    idempotencyKey?: string,
+  ) {
+    const { view } = await repository.create(enterpriseId, input, idempotencyKey);
+    return view;
+  }
+
   it("creates a balanced entry, snapshotting each line's account code/label", async () => {
     const enterprise = await createEnterprise();
     const bank = await createAccount(enterprise.id, "521000");
     const sales = await createAccount(enterprise.id, "701000");
 
     const entry = await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, {
+      createEntry(enterprise.id, {
         description: "Vente au comptant",
         reference: "FACT-0001",
         lines: [
@@ -77,8 +89,8 @@ describe("JournalRepository", () => {
       { accountId: sales.id, debitAmount: 0, creditAmount: 1_000 },
     ];
 
-    const first = await asTenant(enterprise.id, () => repository.create(enterprise.id, { description: "A", lines }));
-    const second = await asTenant(enterprise.id, () => repository.create(enterprise.id, { description: "B", lines }));
+    const first = await asTenant(enterprise.id, () => createEntry(enterprise.id, { description: "A", lines }));
+    const second = await asTenant(enterprise.id, () => createEntry(enterprise.id, { description: "B", lines }));
 
     expect(first.number.endsWith("000001")).toBe(true);
     expect(second.number.endsWith("000002")).toBe(true);
@@ -182,7 +194,7 @@ describe("JournalRepository", () => {
     const other = await createAccount(enterprise.id, "601000");
 
     await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, {
+      createEntry(enterprise.id, {
         description: "Concerne banque",
         lines: [
           { accountId: bank.id, debitAmount: 1_000, creditAmount: 0 },
@@ -191,7 +203,7 @@ describe("JournalRepository", () => {
       }),
     );
     await asTenant(enterprise.id, () =>
-      repository.create(enterprise.id, {
+      createEntry(enterprise.id, {
         description: "Ne concerne pas banque",
         lines: [
           { accountId: other.id, debitAmount: 500, creditAmount: 0 },
@@ -207,6 +219,54 @@ describe("JournalRepository", () => {
     expect(result.items[0].description).toBe("Concerne banque");
   });
 
+  // Régression MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) : un rejeu ne
+  // doit jamais créer une seconde écriture ni consommer un nouveau numéro.
+  it("returns the same entry without creating a duplicate when the same idempotency key is replayed", async () => {
+    const enterprise = await createEnterprise();
+    const bank = await createAccount(enterprise.id, "521000");
+    const sales = await createAccount(enterprise.id, "701000");
+    const key = randomUUID();
+    const input = {
+      description: "Écriture rejouée",
+      lines: [
+        { accountId: bank.id, debitAmount: 1_000, creditAmount: 0 },
+        { accountId: sales.id, debitAmount: 0, creditAmount: 1_000 },
+      ],
+    };
+
+    const first = await asTenant(enterprise.id, () => repository.create(enterprise.id, input, key));
+    const second = await asTenant(enterprise.id, () => repository.create(enterprise.id, input, key));
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.view.id).toBe(first.view.id);
+    expect(second.view.number).toBe(first.view.number);
+
+    const entries = await prisma.journalEntry.findMany({ where: { enterpriseId: enterprise.id } });
+    expect(entries).toHaveLength(1);
+  });
+
+  it("creates two distinct entries, each with its own number, when the idempotency key differs", async () => {
+    const enterprise = await createEnterprise();
+    const bank = await createAccount(enterprise.id, "521000");
+    const sales = await createAccount(enterprise.id, "701000");
+    const input = {
+      description: "Écriture",
+      lines: [
+        { accountId: bank.id, debitAmount: 1_000, creditAmount: 0 },
+        { accountId: sales.id, debitAmount: 0, creditAmount: 1_000 },
+      ],
+    };
+
+    const first = await asTenant(enterprise.id, () => createEntry(enterprise.id, input, randomUUID()));
+    const second = await asTenant(enterprise.id, () => createEntry(enterprise.id, input, randomUUID()));
+
+    expect(first.id).not.toBe(second.id);
+    expect(first.number).not.toBe(second.number);
+    const entries = await prisma.journalEntry.findMany({ where: { enterpriseId: enterprise.id } });
+    expect(entries).toHaveLength(2);
+  });
+
   it("throws NotFoundException when reading an entry that belongs to another enterprise", async () => {
     const enterpriseA = await createEnterprise();
     const enterpriseB = await createEnterprise();
@@ -214,7 +274,7 @@ describe("JournalRepository", () => {
     const salesB = await createAccount(enterpriseB.id, "701000");
 
     const entryB = await asTenant(enterpriseB.id, () =>
-      repository.create(enterpriseB.id, {
+      createEntry(enterpriseB.id, {
         description: "Vente B",
         lines: [
           { accountId: bankB.id, debitAmount: 1_000, creditAmount: 0 },

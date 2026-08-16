@@ -39,6 +39,13 @@ export interface JournalEntryListResult {
   pageSize: number;
 }
 
+// `created: false` signale un rejeu déduplié (docs/adr/0019-...) — même
+// patron que CreateSaleResult.
+export interface CreateJournalEntryResult {
+  view: JournalEntryView;
+  created: boolean;
+}
+
 type JournalEntryWithLines = Prisma.JournalEntryGetPayload<{ include: { lines: { include: { account: true } } } }>;
 
 // Seul point d'accès Prisma pour JournalEntry/JournalEntryLine (CLAUDE.md
@@ -49,7 +56,11 @@ type JournalEntryWithLines = Prisma.JournalEntryGetPayload<{ include: { lines: {
 export class JournalRepository {
   constructor(private readonly tenantPrisma: TenantScopedPrismaService) {}
 
-  async create(enterpriseId: string, input: CreateJournalEntryInput): Promise<JournalEntryView> {
+  async create(
+    enterpriseId: string,
+    input: CreateJournalEntryInput,
+    idempotencyKey?: string,
+  ): Promise<CreateJournalEntryResult> {
     // Corrige ACC-01 (docs/audit/ACCOUNTING-AUDIT.md) : la partie double
     // n'était vérifiée que par createJournalEntrySchema (Zod), en périphérie
     // HTTP. CreateJournalEntryInput est une inférence de forme, pas une
@@ -74,6 +85,20 @@ export class JournalRepository {
     }
 
     return this.tenantPrisma.run(async (tx) => {
+      // Corrige MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) — même patron
+      // que SalesRepository.create. Vérifié avant l'incrément du compteur
+      // de numérotation ci-dessous : un rejeu ne doit jamais consommer un
+      // nouveau numéro d'écriture.
+      if (idempotencyKey) {
+        const existing = await tx.journalEntry.findFirst({
+          where: { enterpriseId, idempotencyKey },
+          include: { lines: { include: { account: true } } },
+        });
+        if (existing) {
+          return { view: this.toEntryView(existing), created: false };
+        }
+      }
+
       const accountIds = [...new Set(input.lines.map((line) => line.accountId))];
       const accounts = await tx.account.findMany({ where: { id: { in: accountIds } } });
       const accountsById = new Map(accounts.map((account) => [account.id, account]));
@@ -97,27 +122,42 @@ export class JournalRepository {
       const sequenceNumber = rows[0]!.last_number;
       const number = `ECR-${enterpriseId.slice(0, 8).toUpperCase()}-${String(sequenceNumber).padStart(6, "0")}`;
 
-      const entry = await tx.journalEntry.create({
-        data: {
-          enterpriseId,
-          number,
-          entryDate: input.entryDate,
-          reference: input.reference,
-          description: input.description,
-          lines: {
-            create: input.lines.map((line) => ({
-              enterpriseId,
-              accountId: line.accountId,
-              label: line.label,
-              debitAmount: line.debitAmount,
-              creditAmount: line.creditAmount,
-            })),
+      try {
+        const entry = await tx.journalEntry.create({
+          data: {
+            enterpriseId,
+            number,
+            entryDate: input.entryDate,
+            reference: input.reference,
+            description: input.description,
+            idempotencyKey: idempotencyKey ?? null,
+            lines: {
+              create: input.lines.map((line) => ({
+                enterpriseId,
+                accountId: line.accountId,
+                label: line.label,
+                debitAmount: line.debitAmount,
+                creditAmount: line.creditAmount,
+              })),
+            },
           },
-        },
-        include: { lines: { include: { account: true } } },
-      });
+          include: { lines: { include: { account: true } } },
+        });
 
-      return this.toEntryView(entry);
+        return { view: this.toEntryView(entry), created: true };
+      } catch (error) {
+        // Filet de concurrence, même patron que SalesRepository.create.
+        if (idempotencyKey && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+          const existing = await tx.journalEntry.findFirst({
+            where: { enterpriseId, idempotencyKey },
+            include: { lines: { include: { account: true } } },
+          });
+          if (existing) {
+            return { view: this.toEntryView(existing), created: false };
+          }
+        }
+        throw error;
+      }
     });
   }
 

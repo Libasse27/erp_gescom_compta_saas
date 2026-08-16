@@ -24,18 +24,22 @@ export class JournalService {
     userId: string,
     input: CreateJournalEntryInput,
     meta: RequestMetadata,
+    idempotencyKey?: string,
   ): Promise<JournalEntryView> {
-    const entry = await this.journalRepository.create(enterpriseId, input);
+    const { view: entry, created } = await this.journalRepository.create(enterpriseId, input, idempotencyKey);
 
-    await this.auditLog.record({
-      userId,
-      enterpriseId,
-      action: "CREATE_JOURNAL_ENTRY",
-      resource: "JournalEntry",
-      resourceId: entry.id,
-      ipAddress: meta.ipAddress,
-      userAgent: meta.userAgent,
-    });
+    // Un rejeu dédupliqué (docs/adr/0019-...) n'a produit aucune écriture.
+    if (created) {
+      await this.auditLog.record({
+        userId,
+        enterpriseId,
+        action: "CREATE_JOURNAL_ENTRY",
+        resource: "JournalEntry",
+        resourceId: entry.id,
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
+    }
 
     return entry;
   }
