@@ -85,7 +85,19 @@ requiert la validation d'un expert-comptable, pas une affirmation de ma part.
      est jugé insuffisant.
 - **Priorité** : P0 — à corriger avant tout chemin de code qui créerait des
   écritures hors du contrôleur HTTP actuel.
-- **Statut** : OUVERT
+- **Statut** : PARTIELLEMENT CORRIGÉ (2026-08-16) — points 1 et 2 de la
+  solution traités : `JournalRepository.create` revérifie l'équilibre
+  débit=crédit et la règle par ligne indépendamment de Zod (même
+  transaction), et une contrainte `CHECK` SQL
+  (`journal_entry_lines_amounts_check`, migration
+  `20260816150000_add_journal_entry_line_check_constraint`) protège
+  `journal_entry_lines` même contre un accès direct à la base. Tests ajoutés
+  dans `journal.repository.spec.ts` (contournement direct du repository,
+  ligne invalide malgré des totaux équilibrés, contrainte SQL). Point 3
+  (somme débit=crédit garantie par écriture au niveau SQL, via trigger
+  agrégé) volontairement non traité — décision explicitement renvoyée par
+  l'audit à une conception séparée avec `architect` si le niveau de garantie
+  applicatif est jugé insuffisant.
 
 ---
 

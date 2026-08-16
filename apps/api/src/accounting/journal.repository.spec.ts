@@ -84,6 +84,75 @@ describe("JournalRepository", () => {
     expect(second.number.endsWith("000002")).toBe(true);
   });
 
+  // Régression ACC-01 (docs/audit/ACCOUNTING-AUDIT.md) : create() est appelé
+  // ici directement, sans transiter par createJournalEntrySchema (Zod) —
+  // exactement le scénario que l'audit signale comme non protégé (job de
+  // reprise, seed, futur module d'auto-comptabilisation appelant le
+  // repository sans passer par le contrôleur HTTP).
+  it("rejects an unbalanced entry even when called directly, bypassing Zod validation", async () => {
+    const enterprise = await createEnterprise();
+    const bank = await createAccount(enterprise.id, "521000");
+    const sales = await createAccount(enterprise.id, "701000");
+
+    await expect(
+      asTenant(enterprise.id, () =>
+        repository.create(enterprise.id, {
+          description: "Écriture déséquilibrée",
+          lines: [
+            { accountId: bank.id, debitAmount: 10_000, creditAmount: 0 },
+            { accountId: sales.id, debitAmount: 0, creditAmount: 5_000 },
+          ],
+        }),
+      ),
+    ).rejects.toThrow("Écriture déséquilibrée");
+
+    const entries = await prisma.journalEntry.findMany({ where: { enterpriseId: enterprise.id } });
+    expect(entries).toHaveLength(0);
+  });
+
+  it("rejects a line carrying both a debit and a credit, even when the entry totals balance out", async () => {
+    const enterprise = await createEnterprise();
+    const bank = await createAccount(enterprise.id, "521000");
+    const sales = await createAccount(enterprise.id, "701000");
+
+    // Totaux équilibrés (10 000 = 10 000) malgré deux lignes individuellement
+    // invalides : seule la vérification ligne par ligne peut détecter ce cas.
+    await expect(
+      asTenant(enterprise.id, () =>
+        repository.create(enterprise.id, {
+          description: "Ligne invalide",
+          lines: [
+            { accountId: bank.id, debitAmount: 5_000, creditAmount: 5_000 },
+            { accountId: sales.id, debitAmount: 5_000, creditAmount: 5_000 },
+          ],
+        }),
+      ),
+    ).rejects.toThrow("Une ligne doit porter soit un débit, soit un crédit");
+  });
+
+  // Dernier filet : même en contournant entièrement l'application (accès
+  // direct à la base avec le rôle propriétaire des tests), la contrainte SQL
+  // journal_entry_lines_amounts_check refuse une ligne déséquilibrée.
+  it("rejects an unbalanced line at the database level (CHECK constraint)", async () => {
+    const enterprise = await createEnterprise();
+    const bank = await createAccount(enterprise.id, "521000");
+    const entry = await prisma.journalEntry.create({
+      data: { enterpriseId: enterprise.id, number: `ECR-DIRECT-${randomUUID()}`, description: "Direct" },
+    });
+
+    await expect(
+      prisma.journalEntryLine.create({
+        data: {
+          journalEntryId: entry.id,
+          enterpriseId: enterprise.id,
+          accountId: bank.id,
+          debitAmount: 10_000,
+          creditAmount: 10_000,
+        },
+      }),
+    ).rejects.toThrow();
+  });
+
   it("rejects an entry referencing an account from another tenant", async () => {
     const enterpriseA = await createEnterprise();
     const enterpriseB = await createEnterprise();

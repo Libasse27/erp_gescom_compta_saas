@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { CreateJournalEntryInput, ListJournalEntriesQuery } from "@erp/validation";
 import { TenantScopedPrismaService } from "../tenant/tenant-scoped-prisma.service";
@@ -50,6 +50,29 @@ export class JournalRepository {
   constructor(private readonly tenantPrisma: TenantScopedPrismaService) {}
 
   async create(enterpriseId: string, input: CreateJournalEntryInput): Promise<JournalEntryView> {
+    // Corrige ACC-01 (docs/audit/ACCOUNTING-AUDIT.md) : la partie double
+    // n'était vérifiée que par createJournalEntrySchema (Zod), en périphérie
+    // HTTP. CreateJournalEntryInput est une inférence de forme, pas une
+    // preuve d'exécution du .refine() — rien n'empêche au niveau du langage
+    // d'appeler create() directement (job de reprise, seed, futur module
+    // d'auto-comptabilisation) avec des lignes déséquilibrées. Défense en
+    // profondeur : revérifié ici, à la source de vérité transactionnelle,
+    // indépendamment du contrôleur HTTP. Un CHECK SQL par ligne (migration
+    // 20260816150000_add_journal_entry_line_check_constraint) protège aussi
+    // un accès direct à la base ; seule la somme débit=crédit par écriture
+    // reste hors de portée d'un CHECK simple (non traité ici, voir ACC-01
+    // point 3 de la solution).
+    const totalDebit = input.lines.reduce((sum, line) => sum + line.debitAmount, 0);
+    const totalCredit = input.lines.reduce((sum, line) => sum + line.creditAmount, 0);
+    if (totalDebit !== totalCredit || totalDebit <= 0) {
+      throw new ConflictException("Écriture déséquilibrée : le total des débits doit être égal au total des crédits");
+    }
+    for (const line of input.lines) {
+      if ((line.debitAmount > 0) === (line.creditAmount > 0)) {
+        throw new ConflictException("Une ligne doit porter soit un débit, soit un crédit, jamais les deux ni aucun des deux");
+      }
+    }
+
     return this.tenantPrisma.run(async (tx) => {
       const accountIds = [...new Set(input.lines.map((line) => line.accountId))];
       const accounts = await tx.account.findMany({ where: { id: { in: accountIds } } });
