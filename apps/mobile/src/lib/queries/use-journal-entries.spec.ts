@@ -52,6 +52,7 @@ function makeQueuedMutation(overrides: Partial<QueuedMutation> = {}): QueuedMuta
     status: "pending",
     retryCount: 0,
     lastError: null,
+    idempotencyKey: "test-idempotency-key",
     createdAt: Date.now(),
     updatedAt: Date.now(),
     ...overrides,

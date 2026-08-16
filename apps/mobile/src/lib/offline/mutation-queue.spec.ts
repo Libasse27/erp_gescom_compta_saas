@@ -48,6 +48,7 @@ function makeMutation(overrides: Partial<QueuedMutation> = {}): QueuedMutation {
     status: "pending",
     retryCount: 0,
     lastError: null,
+    idempotencyKey: "test-idempotency-key",
     createdAt: Date.now(),
     updatedAt: Date.now(),
     ...overrides,
@@ -123,8 +124,33 @@ describe("processQueue", () => {
 
     expect(mockApiFetch).toHaveBeenCalledWith(
       mutation.path,
-      expect.objectContaining({ headers: { Authorization: "Bearer live-token" } }),
+      expect.objectContaining({
+        headers: { Authorization: "Bearer live-token", "Idempotency-Key": mutation.idempotencyKey },
+      }),
     );
+  });
+
+  // Régression MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) : la clé doit
+  // rester strictement identique à travers les rejeux d'une même ligne — un
+  // rejeu avec une clé différente équivaudrait à aucune protection.
+  it("envoie la même clé Idempotency-Key sur chaque tentative de rejeu d'une même mutation", async () => {
+    const mutation = makeMutation({ id: 1, retryCount: 0, idempotencyKey: "stable-key-123" });
+    mockListPendingMutations.mockResolvedValueOnce([mutation]);
+    mockApiFetch.mockResolvedValueOnce(response(500));
+    mockListPendingMutations.mockResolvedValueOnce([mutation]);
+    mockApiFetch.mockResolvedValueOnce(response(200));
+
+    await processQueue({ getAccessToken: () => "live-token" });
+    // Backoff pour le 1er retry : min(2^1 * 2000ms, 60000ms) = 4000ms.
+    await jest.advanceTimersByTimeAsync(4000);
+
+    expect(mockApiFetch).toHaveBeenCalledTimes(2);
+    for (const call of mockApiFetch.mock.calls) {
+      expect(call).toEqual([
+        mutation.path,
+        expect.objectContaining({ headers: expect.objectContaining({ "Idempotency-Key": "stable-key-123" }) }),
+      ]);
+    }
   });
 
   it("n'appelle pas l'API si aucun jeton d'accès n'est disponible", async () => {

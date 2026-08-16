@@ -25,14 +25,45 @@ function migrate(): void {
       status TEXT NOT NULL DEFAULT 'pending',
       retryCount INTEGER NOT NULL DEFAULT 0,
       lastError TEXT,
+      idempotencyKey TEXT NOT NULL DEFAULT '',
       createdAt INTEGER NOT NULL,
       updatedAt INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_mutation_queue_status ON mutation_queue(status, id);
   `);
+
+  // Corrige MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) : colonne ajoutée
+  // après la création initiale de mutation_queue — CREATE TABLE IF NOT
+  // EXISTS ne modifie pas un schéma déjà présent sur un appareil où l'app
+  // était déjà installée. Migration légère et idempotente, sans backfill
+  // nécessaire (une ligne 'pending' déjà en file avant cette mise à jour
+  // n'a jamais eu de clé côté serveur non plus ; NOT NULL DEFAULT '' au
+  // lieu de NULL — SQLite ne distingue pas '' de NULL pour l'unicité, sans
+  // objet ici puisque la déduplication est gérée côté API, pas en local).
+  const columns = db.getAllSync<{ name: string }>("PRAGMA table_info(mutation_queue)");
+  if (!columns.some((column) => column.name === "idempotencyKey")) {
+    db.execSync("ALTER TABLE mutation_queue ADD COLUMN idempotencyKey TEXT NOT NULL DEFAULT ''");
+  }
 }
 
 migrate();
+
+// Pas un secret ni un identifiant métier (le serveur reste seul générateur
+// d'ID, ADR-0014) — une clé de déduplication n'a besoin que d'une
+// probabilité de collision négligeable, pas de garanties cryptographiques.
+// crypto.randomUUID() est disponible sur les runtimes Hermes récents, mais
+// pas garanti sur toute configuration Expo : repli sans dépendance
+// supplémentaire plutôt que d'ajouter expo-crypto pour ce seul besoin
+// (CLAUDE.md §3 : dépendance non triviale à justifier).
+let fallbackKeyCounter = 0;
+function generateIdempotencyKey(): string {
+  const globalCrypto = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (globalCrypto?.randomUUID) {
+    return globalCrypto.randomUUID();
+  }
+  fallbackKeyCounter += 1;
+  return `mut-${Date.now().toString(36)}-${fallbackKeyCounter.toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 
 // --- query_cache : une seule ligne, blob JSON du persister TanStack Query ---
 
@@ -64,6 +95,7 @@ interface MutationQueueRow {
   status: MutationStatus;
   retryCount: number;
   lastError: string | null;
+  idempotencyKey: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -78,6 +110,7 @@ function rowToMutation(row: MutationQueueRow): QueuedMutation {
     status: row.status,
     retryCount: row.retryCount,
     lastError: row.lastError,
+    idempotencyKey: row.idempotencyKey,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -91,9 +124,15 @@ export async function insertMutation(input: {
 }): Promise<QueuedMutation> {
   const now = Date.now();
   const bodyJson = input.body === undefined ? null : JSON.stringify(input.body);
+  // Corrige MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) : générée une seule
+  // fois ici, à l'insertion — jamais régénérée à chaque rejeu de processOne
+  // (mutation-queue.ts), qui la lit depuis cette ligne. Générée pour toute
+  // mutation, pas seulement les créations financières : l'API décide quels
+  // endpoints en tiennent compte, l'infrastructure reste générique.
+  const idempotencyKey = generateIdempotencyKey();
   const result = await db.runAsync(
-    "INSERT INTO mutation_queue (method, path, body, scope, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)",
-    [input.method, input.path, bodyJson, input.scope ?? "tenant", now, now],
+    "INSERT INTO mutation_queue (method, path, body, scope, idempotencyKey, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [input.method, input.path, bodyJson, input.scope ?? "tenant", idempotencyKey, now, now],
   );
   const row = await db.getFirstAsync<MutationQueueRow>("SELECT * FROM mutation_queue WHERE id = ?", [
     result.lastInsertRowId,

@@ -117,7 +117,14 @@ async function processOne(mutation: QueuedMutation, deps: ProcessQueueDeps): Pro
   try {
     response = await apiFetch(mutation.path, {
       method: mutation.method,
-      headers: { Authorization: `Bearer ${accessToken}` },
+      // Idempotency-Key corrige MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...) :
+      // stable à travers tous les rejeux de cette ligne (générée une seule
+      // fois à l'enqueue, voir db.ts) — si le serveur a déjà traité cette
+      // mutation avec succès mais que la réponse a été perdue (timeout,
+      // coupure réseau), le rejeu renvoie le document déjà créé au lieu
+      // d'en créer un second. Envoyée pour toute mutation ; seuls les
+      // endpoints de création financière en tiennent compte côté API.
+      headers: { Authorization: `Bearer ${accessToken}`, "Idempotency-Key": mutation.idempotencyKey },
       body: mutation.body !== undefined ? JSON.stringify(mutation.body) : undefined,
     });
   } catch {
