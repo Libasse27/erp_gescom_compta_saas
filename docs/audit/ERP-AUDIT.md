@@ -65,7 +65,21 @@ signalé comme tel dans les commits ("Phase 8 complete").
   a déjà été traitée (cf. règle d'or générique déjà appliquée aux webhooks de paiement, à
   généraliser).
 - **Priorité** : P1
-- **Statut** : OUVERT
+- **Statut** : PARTIELLEMENT CORRIGÉ (2026-08-16) — `POST /sales`, `POST
+  /purchases` et `POST /invoices` corrigés (docs/adr/0019-...), par
+  contrainte unique `(enterpriseId, idempotencyKey)` par modèle plutôt que
+  par la table générique `(enterpriseId, key, endpoint) -> résultat`
+  suggérée ici (écart assumé et justifié dans l'ADR : sur-ingénierie pour
+  quatre endpoints connus, le patron par contrainte unique est déjà éprouvé
+  dans ce dépôt sur `Payment`). `POST /sales/:id/confirm`,
+  `POST /purchases/:id/confirm`, `POST /invoices/:id/mark-paid` non traités
+  ici : ce sont des transitions d'état déjà protégées par leur machine à
+  états (un rejeu échoue avec 409, pas de corruption silencieuse — hors du
+  périmètre CRITICAL identifié par MOBILE AUDIT-001). **`POST
+  /stock/movements` reste un écart réel et non traité** : c'est une
+  création pure comme `POST /sales`, mais hors du périmètre de l'ADR-0019
+  (limité aux quatre modules nommés par MOBILE AUDIT-001) — à corriger dans
+  un cycle séparé, même patron directement réutilisable.
 
 ---
 

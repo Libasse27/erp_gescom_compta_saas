@@ -90,7 +90,18 @@ l'ADR-0014/0015 mais non exécutée.
 modules Ventes/Achats/Facturation/Comptabilité mobiles, qui sont déjà livrés
 et activables aujourd'hui.
 
-**Statut** : OUVERT
+**Statut** : CORRIGÉ (2026-08-16) — ADR dédié rédigé et tranché
+(`docs/adr/0019-idempotence-mutations-financieres-mobiles.md`) avant toute
+implémentation, comme requis ici. Clé générée une seule fois à l'enqueue
+(`apps/mobile/src/lib/offline/db.ts`), stable à travers tous les rejeux,
+envoyée en en-tête `Idempotency-Key` par `processOne`
+(`mutation-queue.ts`). Déduplication côté API par contrainte unique
+`(enterpriseId, idempotencyKey)` sur `Sale`/`Purchase`/`SalesInvoice`/
+`JournalEntry` — pas de table générique de cache de réponse (écart assumé
+et justifié dans l'ADR : sur-ingénierie pour quatre endpoints connus).
+Aucun changement de site d'appel côté mobile (`use-sales.ts` et
+équivalents), confirmant l'estimation de l'ADR. Tests de non-régression
+ajoutés à chaque étage (repository, contrôleur HTTP, file mobile).
 
 ---
 
