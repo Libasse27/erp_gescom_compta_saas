@@ -286,7 +286,25 @@ et écrit sur stdout (BIL-11).
   une route Super Admin de suspension/réactivation, journalisée en audit. Tests :
   « entreprise suspendue ⇒ 403 avec un access token encore valide ».
 - **Priorité** : P1
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-16) — `JwtAuthGuard` revalide désormais
+  `User.status`/`Enterprise.status` à chaque requête authentifiée (via
+  `PrismaService`, connexion d'identité — fonctionne aussi pour le Super
+  Admin, hors `TenantContext`), avec un court cache mémoire par processus
+  (`ACCOUNT_STATUS_CACHE_TTL_MS`, même patron qu'`EntitlementsService`).
+  Écart assumé par rapport à la solution suggérée : rejet en **401**, pas
+  403 — cohérent avec le message générique déjà utilisé par SEC-03
+  (`auth.service.ts`) et avec le traitement existant d'un jeton
+  invalide/expiré dans ce même guard ; c'est un échec d'authentification
+  (le jeton n'est plus honoré), pas un refus d'autorisation. Nouvelles
+  routes `POST /admin/enterprises/:id/suspend` et `.../reactivate`
+  (`SuperAdminController`), qui révoquent immédiatement tous les refresh
+  tokens de l'entreprise (`CrossTenantRepository.revokeAllRefreshTokensForEnterprise`)
+  et journalisent `SUSPEND_ACCOUNT`/`REACTIVATE_ACCOUNT` (déjà présents
+  dans `AuditAction` mais jamais câblés). Tests de non-régression : accès
+  refusé sur un access token encore valide après suspension de
+  l'entreprise et après suspension de l'utilisateur (`auth.integration.spec.ts`),
+  cycle suspend/reactivate complet avec vérification de l'audit log et du
+  403 pour un non-Super-Admin (`super-admin.integration.spec.ts`).
 
 ### BIL-05
 

@@ -25,6 +25,9 @@ export const env = {
   // JWT ; ce court cache mémoire borne juste la charge Postgres. 0 en test
   // pour un comportement déterministe (voir test/setup-env.js).
   entitlementsCacheTtlMs: () => Number(process.env.ENTITLEMENTS_CACHE_TTL_MS ?? 5000),
+  // Corrige BIL-04 (docs/audit/BILLING-AUDIT.md) : même patron que
+  // entitlementsCacheTtlMs, pour JwtAuthGuard. 0 en test (voir test/setup-env.js).
+  accountStatusCacheTtlMs: () => Number(process.env.ACCOUNT_STATUS_CACHE_TTL_MS ?? 5000),
   // Secret HMAC générique par fournisseur (Phase 5, docs/adr/0010-...) : un
   // placeholder par fournisseur en attendant le schéma de signature réel de
   // chaque vendeur (identifiants marchands non disponibles à ce stade).

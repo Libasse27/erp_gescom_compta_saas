@@ -1,7 +1,12 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import { CrossTenantRepository } from "../tenant/cross-tenant.repository";
 import { AuditLogService } from "../common/audit/audit-log.service";
 import { RequestMetadata } from "../auth/auth.service";
+
+export interface EnterpriseStatusResult {
+  id: string;
+  status: string;
+}
 
 export interface EnterpriseListEntry {
   id: string;
@@ -60,5 +65,65 @@ export class SuperAdminService {
       planName: enterprise.currentSubscription?.plan.name ?? null,
       subscriptionStatus: enterprise.currentSubscription?.status ?? null,
     }));
+  }
+
+  // Corrige BIL-04 (docs/audit/BILLING-AUDIT.md) : jusqu'ici, suspendre une
+  // entreprise pour impayé ou fraude était sans effet — cette route
+  // n'existait pas. Révoque immédiatement toute session en cours (voir
+  // CrossTenantRepository.revokeAllRefreshTokensForEnterprise) plutôt que
+  // de compter uniquement sur JwtAuthGuard/le prochain refresh.
+  async suspendEnterprise(
+    actorUserId: string,
+    enterpriseId: string,
+    meta: RequestMetadata,
+  ): Promise<EnterpriseStatusResult> {
+    const existing = await this.crossTenant.findEnterpriseWithCurrentSubscription(enterpriseId);
+    if (!existing) {
+      throw new NotFoundException("Entreprise introuvable");
+    }
+
+    const updated = await this.crossTenant.setEnterpriseStatus(enterpriseId, "SUSPENDED");
+    await this.crossTenant.revokeAllRefreshTokensForEnterprise(enterpriseId);
+
+    await this.auditLog.record({
+      userId: actorUserId,
+      enterpriseId,
+      action: "SUSPEND_ACCOUNT",
+      resource: "Enterprise",
+      resourceId: enterpriseId,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+    });
+
+    return { id: updated.id, status: updated.status };
+  }
+
+  // Ne restaure aucune session révoquée par suspendEnterprise : un
+  // utilisateur de l'entreprise réactivée doit simplement se reconnecter,
+  // comme après n'importe quelle déconnexion — pas de résurrection de
+  // jeton déjà invalidé.
+  async reactivateEnterprise(
+    actorUserId: string,
+    enterpriseId: string,
+    meta: RequestMetadata,
+  ): Promise<EnterpriseStatusResult> {
+    const existing = await this.crossTenant.findEnterpriseWithCurrentSubscription(enterpriseId);
+    if (!existing) {
+      throw new NotFoundException("Entreprise introuvable");
+    }
+
+    const updated = await this.crossTenant.setEnterpriseStatus(enterpriseId, "ACTIVE");
+
+    await this.auditLog.record({
+      userId: actorUserId,
+      enterpriseId,
+      action: "REACTIVATE_ACCOUNT",
+      resource: "Enterprise",
+      resourceId: enterpriseId,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+    });
+
+    return { id: updated.id, status: updated.status };
   }
 }

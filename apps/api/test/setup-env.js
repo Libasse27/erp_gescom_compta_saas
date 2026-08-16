@@ -18,3 +18,7 @@ if (process.env.TENANT_DATABASE_URL) {
 // changement de plan/abonnement doit être visible immédiatement dans la
 // requête suivante, sans dépendre d'un délai (docs/adr/0005-...).
 process.env.ENTITLEMENTS_CACHE_TTL_MS = "0";
+// Corrige BIL-04 (docs/audit/BILLING-AUDIT.md) : même raisonnement pour
+// JwtAuthGuard — une suspension doit être visible dès la requête suivante
+// en test, sans dépendre d'un délai.
+process.env.ACCOUNT_STATUS_CACHE_TTL_MS = "0";

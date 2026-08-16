@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { Enterprise, Payment, PaymentProvider, Plan, Subscription, SubscriptionStatus } from "@prisma/client";
+import { Enterprise, EnterpriseStatus, Payment, PaymentProvider, Plan, Subscription, SubscriptionStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 
 // Seul point d'accès autorisé pour une route Super Admin qui doit lire ou
@@ -57,6 +57,25 @@ export class CrossTenantRepository {
     currency: string;
   }): Promise<Payment> {
     return this.prisma.payment.create({ data: { ...data, status: "PENDING" } });
+  }
+
+  // Corrige BIL-04 (docs/audit/BILLING-AUDIT.md) : jusqu'ici, aucune route
+  // ne pouvait jamais faire passer Enterprise.status à SUSPENDED — cette
+  // méthode et la suivante sont le seul point d'écriture.
+  setEnterpriseStatus(enterpriseId: string, status: EnterpriseStatus): Promise<Enterprise> {
+    return this.prisma.enterprise.update({ where: { id: enterpriseId }, data: { status } });
+  }
+
+  // Coupe l'accès immédiatement, sans attendre l'expiration naturelle de
+  // l'access token en cours (≤15 min) ni le prochain refresh — complète
+  // JwtAuthGuard (revalidation par requête, cache court) plutôt que de
+  // s'y substituer : les deux se recouvrent volontairement (défense en
+  // profondeur), pas un remplacement l'un de l'autre.
+  revokeAllRefreshTokensForEnterprise(enterpriseId: string): Promise<{ count: number }> {
+    return this.prisma.refreshToken.updateMany({
+      where: { user: { enterpriseId }, status: { not: "REVOKED" } },
+      data: { status: "REVOKED", revokedAt: new Date() },
+    });
   }
 
   // Phase 7.3 — vue Super Admin.

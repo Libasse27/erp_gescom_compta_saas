@@ -170,6 +170,48 @@ describe("Auth (integration)", () => {
     expect(logs).toHaveLength(1);
   });
 
+  // Régression BIL-04 (docs/audit/BILLING-AUDIT.md) : distincte du test
+  // SEC-03 ci-dessus (qui ne rejette qu'au prochain /auth/refresh). Ici,
+  // aucun refresh n'est tenté : l'access token déjà émis, toujours valide
+  // au sens de sa signature/expiration, doit être rejeté sur la requête
+  // suivante par JwtAuthGuard lui-même, pas seulement au refresh.
+  it("rejects an already-issued access token immediately once the enterprise is suspended (BIL-04)", async () => {
+    const { user, enterprise, plainPassword } = await createTestUser();
+
+    const loginRes = await request(app.getHttpServer())
+      .post("/auth/login")
+      .send({ email: user.email, password: plainPassword })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get("/auth/me")
+      .set("Authorization", `Bearer ${loginRes.body.accessToken}`)
+      .expect(200);
+
+    await prisma.enterprise.update({ where: { id: enterprise.id }, data: { status: "SUSPENDED" } });
+
+    await request(app.getHttpServer())
+      .get("/auth/me")
+      .set("Authorization", `Bearer ${loginRes.body.accessToken}`)
+      .expect(401);
+  });
+
+  it("rejects an already-issued access token immediately once the user is suspended (BIL-04)", async () => {
+    const { user, plainPassword } = await createTestUser();
+
+    const loginRes = await request(app.getHttpServer())
+      .post("/auth/login")
+      .send({ email: user.email, password: plainPassword })
+      .expect(200);
+
+    await prisma.user.update({ where: { id: user.id }, data: { status: "SUSPENDED" } });
+
+    await request(app.getHttpServer())
+      .get("/auth/me")
+      .set("Authorization", `Bearer ${loginRes.body.accessToken}`)
+      .expect(401);
+  });
+
   it("rotates the refresh token and rejects the old one on reuse, revoking the whole family", async () => {
     const { user, plainPassword } = await createTestUser();
 

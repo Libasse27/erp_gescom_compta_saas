@@ -96,6 +96,13 @@ describe("SuperAdminController (integration)", () => {
   async function createEnterpriseAdminToken(): Promise<string> {
     const enterprise = await prisma.enterprise.create({ data: { name: `Regular Admin Test ${randomUUID()}` } });
     createdEnterpriseIds.push(enterprise.id);
+    return createEnterpriseAdminTokenFor(enterprise.id);
+  }
+
+  // Variante de createEnterpriseAdminToken pour une entreprise déjà créée
+  // par l'appelant (ex. via createEnterpriseWithSubscription) — nécessaire
+  // pour les tests BIL-04 qui doivent suspendre cette entreprise précise.
+  async function createEnterpriseAdminTokenFor(enterpriseId: string): Promise<string> {
     const password = "AdminPassword9!";
     const admin = await prisma.user.create({
       data: {
@@ -103,10 +110,11 @@ describe("SuperAdminController (integration)", () => {
         passwordHash: await passwordService.hash(password),
         firstName: "Admin",
         lastName: "Test",
-        enterpriseId: enterprise.id,
+        enterpriseId,
         status: "ACTIVE",
       },
     });
+    createdUserIds.push(admin.id);
     const loginRes = await request(app.getHttpServer())
       .post("/auth/login")
       .send({ email: admin.email, password })
@@ -167,5 +175,82 @@ describe("SuperAdminController (integration)", () => {
   it("rejects without authentication (401)", async () => {
     await request(app.getHttpServer()).get("/admin/overview").expect(401);
     await request(app.getHttpServer()).get("/admin/enterprises").expect(401);
+  });
+
+  // Régression BIL-04 (docs/audit/BILLING-AUDIT.md) : jusqu'ici, suspendre
+  // une entreprise n'avait aucun effet réel — cette route n'existait pas.
+  it("suspends an enterprise, revoking its users' sessions immediately and logging SUSPEND_ACCOUNT", async () => {
+    const superAdminToken = await createSuperAdminToken();
+    const { enterprise } = await createEnterpriseWithSubscription("ACTIVE");
+
+    const tenantAdminToken = await createEnterpriseAdminTokenFor(enterprise.id);
+    await request(app.getHttpServer())
+      .get("/users/me/context")
+      .set("Authorization", `Bearer ${tenantAdminToken}`)
+      .expect(200);
+
+    const res = await request(app.getHttpServer())
+      .post(`/admin/enterprises/${enterprise.id}/suspend`)
+      .set("Authorization", `Bearer ${superAdminToken}`)
+      .expect(200);
+    expect(res.body.status).toBe("SUSPENDED");
+
+    // L'access token déjà émis (encore valide au sens de sa signature) est
+    // désormais rejeté par JwtAuthGuard — pas seulement au prochain refresh.
+    await request(app.getHttpServer())
+      .get("/users/me/context")
+      .set("Authorization", `Bearer ${tenantAdminToken}`)
+      .expect(401);
+
+    const enterpriseRow = await prisma.enterprise.findUniqueOrThrow({ where: { id: enterprise.id } });
+    expect(enterpriseRow.status).toBe("SUSPENDED");
+
+    const logs = await prisma.auditLog.findMany({
+      where: { enterpriseId: enterprise.id, action: "SUSPEND_ACCOUNT" },
+    });
+    expect(logs).toHaveLength(1);
+  });
+
+  it("reactivates a suspended enterprise and logs REACTIVATE_ACCOUNT", async () => {
+    const superAdminToken = await createSuperAdminToken();
+    const { enterprise } = await createEnterpriseWithSubscription("SUSPENDED");
+
+    const res = await request(app.getHttpServer())
+      .post(`/admin/enterprises/${enterprise.id}/reactivate`)
+      .set("Authorization", `Bearer ${superAdminToken}`)
+      .expect(200);
+    expect(res.body.status).toBe("ACTIVE");
+
+    const enterpriseRow = await prisma.enterprise.findUniqueOrThrow({ where: { id: enterprise.id } });
+    expect(enterpriseRow.status).toBe("ACTIVE");
+
+    const logs = await prisma.auditLog.findMany({
+      where: { enterpriseId: enterprise.id, action: "REACTIVATE_ACCOUNT" },
+    });
+    expect(logs).toHaveLength(1);
+  });
+
+  it("returns 404 when suspending an enterprise that does not exist", async () => {
+    const superAdminToken = await createSuperAdminToken();
+
+    await request(app.getHttpServer())
+      .post(`/admin/enterprises/${randomUUID()}/suspend`)
+      .set("Authorization", `Bearer ${superAdminToken}`)
+      .expect(404);
+  });
+
+  it("rejects suspend/reactivate for a non-Super-Admin (403)", async () => {
+    const accessToken = await createEnterpriseAdminToken();
+    const { enterprise } = await createEnterpriseWithSubscription("ACTIVE");
+
+    await request(app.getHttpServer())
+      .post(`/admin/enterprises/${enterprise.id}/suspend`)
+      .set("Authorization", `Bearer ${accessToken}`)
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .post(`/admin/enterprises/${enterprise.id}/reactivate`)
+      .set("Authorization", `Bearer ${accessToken}`)
+      .expect(403);
   });
 });
