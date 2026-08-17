@@ -87,7 +87,34 @@ scripts stub par de vraies commandes une fois la première suite en place —
 ne jamais laisser `exit 0` inconditionnel dans un script nommé `test`.
 
 **Priorité** : P0
-**Statut** : OUVERT
+**Statut** : PARTIEL (2026-08-17) — `apps/web` a maintenant une infrastructure
+de test réelle (Jest + `next/jest` + Testing Library, pas Vitest comme suggéré
+ci-dessus : choix délibéré pour rester cohérent avec `apps/api`/`apps/mobile`,
+qui utilisent déjà Jest — éviter un second framework de test sans nécessité).
+`pnpm --filter @erp/web test` exécute désormais 3 suites / 13 tests réels
+(plus de stub `exit 0`) : `AuthProvider` (refresh silencieux, login
+succès/échec, MFA, logout — `src/lib/session/auth-provider.spec.tsx`),
+`ProtectedRoute` (redirection non authentifié, affichage authentifié —
+`src/lib/session/protected-route.spec.tsx`), et la page de connexion
+bout-en-bout (`src/app/(auth)/login/page.spec.tsx` : rejet Zod d'un email
+invalide, connexion réussie avec redirection `/app`/`/super-admin` selon
+`isSuperAdmin`, bascule vers le formulaire MFA, message d'erreur serveur).
+Deux vrais bugs trouvés et corrigés en écrivant ces tests (pas seulement des
+suppositions) : `components/ui/input.tsx` n'était pas enveloppé dans
+`React.forwardRef`, cassant silencieusement `field.ref` de react-hook-form ;
+aucun `<form>` de l'application ne déclarait `noValidate`, donc la validation
+HTML5 native (`type="email"`) bloquait la soumission avant que Zod/RHF ne
+s'exécute — corrigé uniquement sur la page de connexion (périmètre de ce
+correctif), les autres formulaires métier ont probablement le même
+comportement et restent à corriger séparément.
+`test:tenant` reste un stub, mais désormais justifié explicitement (comme
+`apps/desktop`) plutôt que silencieux : le web ne lit/n'écrit jamais
+`tenantId` côté client.
+**Reste ouvert** : Clients/Facturation (les flux à plus fort risque financier
+cités dans "Risque" ci-dessus) n'ont toujours aucun test, ni `packages/validation`
+ni `packages/utils/format-fcfa.ts` (voir `TEST-AUDIT.md` MAJOR-1/2/3) ; aucun
+Playwright/E2E ; pas de MSW (les tests actuels mockent `global.fetch`
+directement, suffisant à ce périmètre mais pas généralisé).
 
 ---
 
@@ -316,7 +343,7 @@ AUDIT-WEB-001 plutôt que comme item isolé.
 
 | ID | Sévérité | Statut |
 |---|---|---|
-| AUDIT-WEB-001 | CRITICAL | OUVERT |
+| AUDIT-WEB-001 | CRITICAL | PARTIEL (2026-08-17) — Login/MFA/session testés, Clients/Facturation/E2E restent ouverts |
 | AUDIT-WEB-002 | HIGH | OUVERT |
 | AUDIT-WEB-003 | MEDIUM | OUVERT |
 | AUDIT-WEB-004 | MEDIUM | OUVERT |

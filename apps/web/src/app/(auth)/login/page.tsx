@@ -64,7 +64,11 @@ export default function LoginPage() {
         <CardContent>
           {!challengeToken ? (
             <Form {...loginForm}>
-              <form onSubmit={loginForm.handleSubmit(onLoginSubmit)} className="grid gap-4">
+              <form
+                onSubmit={loginForm.handleSubmit(onLoginSubmit)}
+                noValidate
+                className="grid gap-4"
+              >
                 <FormField
                   control={loginForm.control}
                   name="email"
@@ -107,7 +111,7 @@ export default function LoginPage() {
             </Form>
           ) : (
             <Form {...mfaForm}>
-              <form onSubmit={mfaForm.handleSubmit(onMfaSubmit)} className="grid gap-4">
+              <form onSubmit={mfaForm.handleSubmit(onMfaSubmit)} noValidate className="grid gap-4">
                 <FormField
                   control={mfaForm.control}
                   name="code"
