@@ -25,7 +25,7 @@
 | 6 | Backup/restore | Oui — chiffrement `age` réel (clé privée jamais sur le VPS), restauration réellement exercée avec preuve technique détaillée ; **RPO/RTO formalisés le 2026-08-17** (P-07), validation métier du chiffre encore à faire |
 | 7 | Logs + /health | **Corrigé le 2026-08-17** — corrélation `requestId`/`tenantId`/`userId` réelle et testée, pas de fuite de secret constatée, `/health/live` + `/health/ready` séparés (P-06) |
 | 8 | HTTPS/Caddy | Oui — HTTPS auto + redirection HTTP→HTTPS vérifiées (mode `tls internal`), CORS en liste blanche, helmet actif |
-| 9 | Monitoring/alerting | **Non** — rien au-delà logs + health, aucun outil de métriques/erreurs/alerting |
+| 9 | Monitoring/alerting | Partiel — scaffolding Sentry ajouté (désactivé par défaut, P-08) ; **compte Sentry/UptimeRobot pas encore créé, métriques de latence/débit toujours absentes** |
 | 10 | Secrets committés | Non trouvé — recherche large sans résultat concluant, `.env.prod` correctement ignoré |
 
 ---
@@ -305,7 +305,16 @@ webhooks de paiement (déjà un point sensible identifié, `docs/adr/0010-...`)
 avec des métriques de taux d'échec.
 **Priorité** : P1 — à traiter avant tout trafic de production réel, pas
 après un premier incident.
-**Statut** : OUVERT
+**Statut** : PARTIEL (2026-08-17) — scaffolding Sentry ajouté sur `api` et
+`web` (`apps/api/src/instrument.ts`, `apps/web/src/instrumentation.ts`),
+désactivé par défaut (`SENTRY_DSN` vide) ; marche à suivre pour un compte
+Sentry et un moniteur d'uptime externe documentée dans
+`docs/deployment/MONITORING.md`. **Toujours ouvert, hors de portée du code
+seul** : la création effective des comptes Sentry/UptimeRobot (services
+tiers), et donc l'activation réelle de `SENTRY_DSN` en production, n'a pas
+été faite. Stack Prometheus/Grafana/Alertmanager et instrumentation dédiée
+des webhooks de paiement toujours reportés, cohérent avec l'absence de VPS
+cible.
 
 ---
 
