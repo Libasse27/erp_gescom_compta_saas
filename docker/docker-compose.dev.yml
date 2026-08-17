@@ -7,6 +7,14 @@ services:
       POSTGRES_USER: erp
       POSTGRES_PASSWORD: erp_dev_password
       POSTGRES_DB: erp_saas_dev
+    # max_pred_locks_per_transaction (défaut 64) : sous Serializable (voir
+    # StockRepository.createMovement, isolation SSI), la table de verrous
+    # prédicatifs sature quand plusieurs suites Jest tournent en parallèle
+    # contre erp_saas_test, provoquant des P2034 (40001) entre transactions
+    # qui ne partagent pourtant aucune ligne — faux positifs dus à
+    # l'escalade de verrous, pas un bug applicatif. Paramètre PGC_POSTMASTER
+    # (nécessite un redémarrage, pas juste un reload).
+    command: ["postgres", "-c", "max_pred_locks_per_transaction=512"]
     ports:
       - "5432:5432"
     volumes:
