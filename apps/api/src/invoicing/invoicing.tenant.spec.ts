@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { AppModule } from "../app.module";
 import { RawDbClient } from "../prisma/raw-db-client";
 import { PasswordService } from "../auth/password.service";
+import { createSetupAdmin, createTenantFixtureTracking, cleanupTenantFixtures, TenantFixture } from "../../test/tenant-fixtures";
 
 // Suite test:tenant — copie conforme de sales.tenant.spec.ts/
 // purchases.tenant.spec.ts (modules 5 et 6) : GET /invoices/:id d'un autre
@@ -14,93 +15,27 @@ import { PasswordService } from "../auth/password.service";
 describe("InvoicingController — tenant isolation (integration)", () => {
   let app: INestApplication;
   let prisma: RawDbClient;
-  let passwordService: PasswordService;
-  let invoicingFeatureId: string;
-
-  const createdEnterpriseIds: string[] = [];
-  const createdPlanIds: string[] = [];
+  let setupAdmin: (label: string) => Promise<TenantFixture>;
+  const tracking = createTenantFixtureTracking();
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
     prisma = new RawDbClient();
-    passwordService = app.get(PasswordService);
-
-    const feature = await prisma.feature.upsert({
-      where: { key: "invoicing" },
-      create: { key: "invoicing", label: "Facturation" },
-      update: {},
-    });
-    invoicingFeatureId = feature.id;
+    setupAdmin = createSetupAdmin(app, prisma, app.get(PasswordService), tracking);
   });
 
   afterAll(async () => {
-    await prisma.salesInvoice.deleteMany({ where: { enterpriseId: { in: createdEnterpriseIds } } });
-    await prisma.salesInvoiceCounter.deleteMany({ where: { enterpriseId: { in: createdEnterpriseIds } } });
-    await prisma.saleLine.deleteMany({ where: { enterpriseId: { in: createdEnterpriseIds } } });
-    await prisma.sale.deleteMany({ where: { enterpriseId: { in: createdEnterpriseIds } } });
-    await prisma.product.deleteMany({ where: { enterpriseId: { in: createdEnterpriseIds } } });
-    await prisma.customer.deleteMany({ where: { enterpriseId: { in: createdEnterpriseIds } } });
-    await prisma.enterprise.updateMany({
-      where: { id: { in: createdEnterpriseIds } },
-      data: { currentSubscriptionId: null },
-    });
-    await prisma.userRole.deleteMany({ where: { user: { enterpriseId: { in: createdEnterpriseIds } } } });
-    await prisma.user.deleteMany({ where: { enterpriseId: { in: createdEnterpriseIds } } });
-    await prisma.rolePermission.deleteMany({ where: { role: { enterpriseId: { in: createdEnterpriseIds } } } });
-    await prisma.role.deleteMany({ where: { enterpriseId: { in: createdEnterpriseIds } } });
-    await prisma.subscription.deleteMany({ where: { enterpriseId: { in: createdEnterpriseIds } } });
-    await prisma.enterprise.deleteMany({ where: { id: { in: createdEnterpriseIds } } });
-    await prisma.plan.deleteMany({ where: { id: { in: createdPlanIds } } });
+    await prisma.salesInvoice.deleteMany({ where: { enterpriseId: { in: tracking.enterpriseIds } } });
+    await prisma.salesInvoiceCounter.deleteMany({ where: { enterpriseId: { in: tracking.enterpriseIds } } });
+    await prisma.saleLine.deleteMany({ where: { enterpriseId: { in: tracking.enterpriseIds } } });
+    await prisma.sale.deleteMany({ where: { enterpriseId: { in: tracking.enterpriseIds } } });
+    await prisma.product.deleteMany({ where: { enterpriseId: { in: tracking.enterpriseIds } } });
+    await prisma.customer.deleteMany({ where: { enterpriseId: { in: tracking.enterpriseIds } } });
+    await cleanupTenantFixtures(prisma, tracking);
     await app.close();
   });
-
-  async function setupAdmin(label: string) {
-    const plan = await prisma.plan.create({
-      data: {
-        code: `PLAN_${randomUUID()}`,
-        name: "Plan de test",
-        priceMonthly: 5_000,
-        planFeatures: { create: { featureId: invoicingFeatureId, enabled: true } },
-      },
-    });
-    createdPlanIds.push(plan.id);
-
-    const enterprise = await prisma.enterprise.create({ data: { name: `${label} ${randomUUID()}` } });
-    createdEnterpriseIds.push(enterprise.id);
-
-    const subscription = await prisma.subscription.create({
-      data: { enterpriseId: enterprise.id, planId: plan.id, status: "ACTIVE", startDate: new Date() },
-    });
-    await prisma.enterprise.update({ where: { id: enterprise.id }, data: { currentSubscriptionId: subscription.id } });
-
-    const role = await prisma.role.create({ data: { enterpriseId: enterprise.id, name: "ADMIN" } });
-    for (const key of ["invoicing.read", "invoicing.create"] as const) {
-      const permission = await prisma.permission.upsert({ where: { key }, create: { key }, update: {} });
-      await prisma.rolePermission.create({ data: { roleId: role.id, permissionId: permission.id } });
-    }
-
-    const password = "TestPassword9!";
-    const user = await prisma.user.create({
-      data: {
-        email: `admin-${randomUUID()}@test.local`,
-        passwordHash: await passwordService.hash(password),
-        firstName: "Admin",
-        lastName: label,
-        enterpriseId: enterprise.id,
-        status: "ACTIVE",
-      },
-    });
-    await prisma.userRole.create({ data: { userId: user.id, roleId: role.id } });
-
-    const loginRes = await request(app.getHttpServer())
-      .post("/auth/login")
-      .send({ email: user.email, password })
-      .expect(200);
-
-    return { enterpriseId: enterprise.id, accessToken: loginRes.body.accessToken as string };
-  }
 
   async function createConfirmedSale(enterpriseId: string) {
     const customer = await prisma.customer.create({ data: { enterpriseId, type: "COMPANY", name: "Client test" } });
