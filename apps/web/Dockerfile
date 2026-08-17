@@ -4,6 +4,15 @@
 # fournie en --build-arg, pas seulement en variable d'environnement runtime.
 
 FROM node:20-alpine AS base
+# Paquets Alpine (libssl3/libcrypto3...) : la version figée dans l'image
+# node:20-alpine publiée peut être en retard sur les correctifs de sécurité
+# du dépôt Alpine — CVE-2026-45447 (OpenSSL, use-after-free dans
+# PKCS7_verify) détectée par Trivy en CI sur erp-web:ci, qui ne touchait
+# jamais apk contrairement à apps/api/Dockerfile (dont le `apk add`
+# installait déjà une version à jour, sans upgrade explicite). `apk
+# upgrade` tire les derniers paquets disponibles dans l'index au moment du
+# build, sans ajouter de nouveau paquet.
+RUN apk upgrade --no-cache
 # npm embarque ses propres dépendances internes (tar, glob, minimatch,
 # cross-spawn, brace-expansion, ip-address, sigstore, picomatch) — la
 # version fournie par node:20-alpine embarquait des CVE connues (dont une
