@@ -137,7 +137,22 @@ explicite si Docker lui-meme n'est pas demarre, plutot que de laisser Prisma ech
 generique P1001. Documenter ce prerequis dans le README racine.
 
 **Priorite** : Haute
-**Statut** : OUVERT
+**Statut** : CORRIGE (2026-08-17) — `apps/api/test/global-setup.js` sonde
+maintenant `DATABASE_URL` (simple connexion TCP) avant tout : si Postgres
+repond deja (cas CI, service container GitHub Actions deja demarre avant
+l'etape de test), rien ne touche a Docker, zero risque de regression CI. Si
+injoignable (cas local, Docker Desktop pas demarre), lance automatiquement
+`docker compose -f docker/docker-compose.dev.yml up -d --wait` ; si Docker
+lui-meme est indisponible, leve une erreur explicite ("Demarre Docker Desktop
+puis relance...") au lieu du P1001 Prisma opaque d'origine. Verifie
+reellement dans les deux sens : Docker Desktop coupe -> message clair
+obtenu ; Docker Desktop demarre -> `docker compose up -d --wait` demarre
+seul le conteneur `erp_saas_postgres_dev` et les tests passent normalement.
+`pnpm test`/`pnpm test:tenant` executes deux fois de suite pour confirmer
+(60/60 suites puis a nouveau 60/60 — la premiere execution avait 2 echecs
+isoles sur `sales`/`invoicing`, non reproduits au rerun : flakiness de
+parallelisation Jest preexistante, sans rapport avec ce correctif, a
+surveiller mais non traitee ici).
 
 ---
 
