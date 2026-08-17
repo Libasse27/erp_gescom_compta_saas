@@ -21,7 +21,7 @@
 | # | Sujet | Verdict |
 |---|-------|---------|
 | 4 | Docker | **Corrigé le 2026-08-17** — multi-stage OK, non-root OK, pas de secret en dur OK, healthcheck API OK, healthcheck `web` ajouté (P-05), limites CPU/mémoire sur les 4 services ajoutées (P-04) |
-| 5 | CI/CD | Partiel — pipeline complet et **réellement vert sur GitHub Actions depuis le correctif du 2026-08-17** (run #6, P-10 : échouait à 100% des runs avant ça, jamais détecté) ; build Docker api/web ajouté en CI (P-02) ; SCA bloquant ajouté (P-01 partiel) ; **scan secrets/SAST/image toujours absent, pas de CD, pas de staging/E2E, protection de branche toujours non activée** (P-01 reste PARTIEL, P-03 reste OUVERT) |
+| 5 | CI/CD | Partiel — pipeline complet et **réellement vert sur GitHub Actions depuis le correctif du 2026-08-17** (run #6, P-10 : échouait à 100% des runs avant ça, jamais détecté) ; build Docker api/web ajouté en CI (P-02) ; SCA + scan de secrets + scan d'image tous bloquants (P-01 CORRIGÉ) ; **pas de SAST, pas de CD, pas de staging/E2E, protection de branche toujours non activée** (P-03 reste OUVERT) |
 | 6 | Backup/restore | Oui — chiffrement `age` réel (clé privée jamais sur le VPS), restauration réellement exercée avec preuve technique détaillée ; **RPO/RTO formalisés le 2026-08-17** (P-07), validation métier du chiffre encore à faire |
 | 7 | Logs + /health | **Corrigé le 2026-08-17** — corrélation `requestId`/`tenantId`/`userId` réelle et testée, pas de fuite de secret constatée, `/health/live` + `/health/ready` séparés (P-06) |
 | 8 | HTTPS/Caddy | Oui — HTTPS auto + redirection HTTP→HTTPS vérifiées (mode `tls internal`), CORS en liste blanche, helmet actif |
@@ -53,14 +53,17 @@ CI), un scan d'image après build Docker (Trivy, bloquant sur high/critical)
 une fois les images buildées en CI (actuellement les Dockerfiles ne sont
 même pas construits en CI — voir P-02).
 **Priorité** : P1
-**Statut** : PARTIEL (2026-08-17) — SCA ajouté (`scripts/ci-audit-gate.sh`,
-bloquant sur les avis high/critical *avec correctif publié* ; 7 des 9 avis
-HIGH pré-existants corrigés par overrides pnpm, voir commit
-`fix(deps): corriger multer/sharp/postcss...`). **Toujours ouvert** : scan
-de secrets (gitleaks) et scan d'image Docker (Trivy, maintenant possible
-depuis l'ajout du build d'image en CI, P-02) — ajout volontairement différé,
-ce sont des actions GitHub tierces à faire valider explicitement avant
-ajout (CLAUDE.md §3, dépendance non triviale).
+**Statut** : CORRIGÉ (2026-08-17) — SCA (`scripts/ci-audit-gate.sh`, 7 des 9
+avis HIGH pré-existants corrigés par overrides pnpm), scan de secrets
+(gitleaks, historique complet, un faux positif connu neutralisé par
+fingerprint dans `.gitleaksignore`) et scan des images Docker api/web
+(Trivy, `--ignore-unfixed`) tous ajoutés et bloquants dans
+`.github/workflows/ci.yml`. Les trois outils sont installés en binaire
+officiel vérifié par checksum plutôt qu'en Action GitHub tierce (choix
+explicite, cf. commits correspondants) — pas de SAST, hors périmètre de ce
+lot. Scan Trivy non vérifiable en local (pas de daemon Docker dans
+l'environnement de développement utilisé) — à confirmer sur le premier run
+GitHub Actions réel.
 
 ---
 
