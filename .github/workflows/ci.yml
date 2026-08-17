@@ -104,3 +104,17 @@ jobs:
 
       - name: Tests d'isolation multi-tenant (bloquant)
         run: pnpm test:tenant
+
+      # P-02 (docs/audit/PRODUCTION-READINESS.md) : ni buildé ni scanné en CI
+      # jusqu'ici — un Dockerfile cassé (dépendance système oubliée, étape
+      # manquante) n'était détecté qu'au déploiement manuel sur le VPS. `docker
+      # build` direct plutôt qu'une action tierce (docker/build-push-action) :
+      # zéro dépendance CI supplémentaire, le binaire docker est déjà présent
+      # sur les runners GitHub-hosted. Build sans push : ces images ne sont
+      # pas encore publiées vers un registre (pas de CD, voir
+      # docs/deployment/CI-CD.md).
+      - name: Build de l'image Docker api (sans push)
+        run: docker build -f apps/api/Dockerfile -t erp-api:ci .
+
+      - name: Build de l'image Docker web (sans push)
+        run: docker build -f apps/web/Dockerfile -t erp-web:ci --build-arg NEXT_PUBLIC_API_URL="$NEXT_PUBLIC_API_URL" .
