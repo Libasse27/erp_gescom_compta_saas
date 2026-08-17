@@ -1,5 +1,34 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  // Turborepo 2.x est en envMode "strict" par défaut : une tâche ne voit que
+  // les variables d'environnement déclarées ici, jamais tout l'environnement
+  // du process parent. En local, apps/api/.env masquait totalement ce
+  // filtrage (dotenv rechargeait DATABASE_URL etc. depuis le fichier, quel
+  // que soit ce que turbo transmettait) ; en CI, ce fichier n'existe pas
+  // (gitignored) et .github/workflows/ci.yml ne fournit ces valeurs que via
+  // le bloc `env:` du workflow — sans cette liste, `turbo run test`
+  // n'transmettait rien de tout cela aux tâches, d'où l'échec systématique
+  // et quasi instantané de `pnpm test` en CI (jamais reproduit localement).
+  // passThroughEnv (pas env/globalEnv) : ces valeurs ne doivent pas entrer
+  // dans le hash de cache turbo (secrets, sans intérêt pour l'invalidation).
+  "globalPassThroughEnv": [
+    "DATABASE_URL",
+    "IDENTITY_DATABASE_URL",
+    "TENANT_DATABASE_URL",
+    "JWT_ACCESS_SECRET",
+    "JWT_ACCESS_TTL",
+    "JWT_REFRESH_TTL",
+    "MFA_ENCRYPTION_KEY",
+    "PAYMENT_WEBHOOK_SECRET_WAVE",
+    "PAYMENT_WEBHOOK_SECRET_ORANGE_MONEY",
+    "PAYMENT_WEBHOOK_SECRET_FREE_MONEY",
+    "PAYMENT_WEBHOOK_SECRET_STRIPE",
+    "PAYMENT_WEBHOOK_SECRET_CARD",
+    "PAYMENT_GRACE_PERIOD_DAYS",
+    "CORS_ALLOWED_ORIGINS",
+    "NEXT_PUBLIC_API_URL",
+    "PORT"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

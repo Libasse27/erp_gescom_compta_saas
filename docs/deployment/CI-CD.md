@@ -1,5 +1,31 @@
 # CI/CD
 
+## Incident résolu (2026-08-17) : `pnpm test` échouait à 100% sur GitHub Actions depuis la Phase 10.2
+
+Le pipeline CI a été mis en place en Phase 10.2 mais n'avait jamais réellement
+réussi une seule fois sur GitHub Actions — chaque run échouait à l'étape
+`Tests` en ~5 secondes (jamais assez de temps pour exécuter réellement les
+326+ tests), jamais remarqué plus tôt faute de `gh` authentifié pour lire les
+logs, et jamais reproduit en local. Diagnostiqué le 2026-08-17 en repérant que
+Turborepo 2.x est en `envMode: "strict"` par défaut : une tâche `turbo run`
+ne voit que les variables d'environnement déclarées dans `turbo.json`, jamais
+tout l'environnement du process parent. Le bloc `env:` de `ci.yml`
+(`DATABASE_URL`, secrets JWT/webhooks…) n'atteignait donc jamais le process
+Jest de `@erp/api`, qui échouait immédiatement avec `DATABASE_URL manquant`.
+**Jamais reproduit en local** parce que `apps/api/.env` (fichier réel,
+gitignored) sert de filet de secours à `dotenv.config()` dans
+`global-setup.js`/`setup-env.js`, indépendamment de ce que `turbo` transmet —
+en CI ce fichier n'existe pas, donc aucun filet.
+
+**Corrigé** par `turbo.json` → `globalPassThroughEnv` (liste explicite des
+variables requises, transmises sans participer au hash de cache). Vérifié
+réellement : reproduction locale de l'échec exact (`apps/api/.env` déplacé
+temporairement + `turbo run test --filter=@erp/api` avec seulement les
+variables façon CI dans le shell → même erreur `DATABASE_URL manquant`),
+puis confirmation que l'ajout de `globalPassThroughEnv` résout ce cas précis
+(60/60 suites, 328/328 tests, `.env` toujours absent) avant de restaurer le
+fichier et de relancer la suite complète normalement.
+
 ## État actuel (Phase 10.2) : intégration continue seule
 
 Le pipeline `.github/workflows/ci.yml` s'exécute sur chaque `push`/`pull_request`

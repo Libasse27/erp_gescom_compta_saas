@@ -21,7 +21,7 @@
 | # | Sujet | Verdict |
 |---|-------|---------|
 | 4 | Docker | Partiel — multi-stage OK, non-root OK, pas de secret en dur OK, healthcheck API OK ; **pas de healthcheck `web`, aucune limite CPU/mémoire nulle part** |
-| 5 | CI/CD | Partiel — pipeline complet et bloquant jusqu'à `test:tenant` ; **aucun scan sécurité (SCA/secrets/SAST/image/IaC), pas de CD, pas de staging/E2E, protection de branche non activée** |
+| 5 | CI/CD | Partiel — pipeline complet, correctif P-10 appliqué et vérifié en local (échouait à 100% des runs GitHub Actions avant ça, jamais détecté) — **premier run réel post-correctif à confirmer** ; **aucun scan sécurité (SCA/secrets/SAST/image/IaC), pas de CD, pas de staging/E2E, protection de branche non activée** |
 | 6 | Backup/restore | Oui — chiffrement `age` réel (clé privée jamais sur le VPS), restauration réellement exercée avec preuve technique détaillée ; **RPO/RTO non formalisés en chiffres** |
 | 7 | Logs + /health | Partiel — corrélation `requestId`/`tenantId`/`userId` réelle et testée, pas de fuite de secret constatée ; **un seul `/health`, pas de `/health/live` + `/health/ready` séparés** |
 | 8 | HTTPS/Caddy | Oui — HTTPS auto + redirection HTTP→HTTPS vérifiées (mode `tls internal`), CORS en liste blanche, helmet actif |
@@ -306,6 +306,58 @@ commentaire explicite sur la nature de ces valeurs.
 
 ---
 
+## P-10 — Le pipeline CI échouait à 100% sur GitHub Actions depuis sa création, jamais détecté
+
+**Sévérité** : CRITICAL (reclassé depuis « non détecté » — un pipeline qui
+échoue toujours équivaut à l'absence totale de CI)
+**Composant** : `turbo.json`, `.github/workflows/ci.yml`
+**Description** : Turborepo 2.x (`^2.1.3`, résolu en `2.10.9`) est en
+`envMode: "strict"` par défaut — une tâche lancée via `turbo run` ne reçoit
+que les variables d'environnement explicitement déclarées dans `turbo.json`
+(`env`/`globalEnv`/`passThroughEnv`), jamais l'environnement complet du
+process parent. `turbo.json` ne déclarait aucune de ces clés. En CI,
+`.github/workflows/ci.yml` fournit `DATABASE_URL` et les autres secrets via
+le bloc `env:` du *workflow* (donc présents dans le process du job), mais
+`pnpm test` → `turbo run test` les filtrait avant qu'ils n'atteignent le
+process Jest de `@erp/api`, qui échouait immédiatement
+(`DATABASE_URL manquant`). **Jamais détecté ni corrigé sur les 4 exécutions
+précédentes** (Phase 10.2 à ce jour) faute d'accès à `gh` authentifié pour
+lire les logs bruts des runs — chaque échec avait été implicitement supposé
+« pas encore vérifié » plutôt que « vérifié et cassé ». **Jamais reproduit en
+local** : `apps/api/.env` (fichier réel, gitignored, absent en CI) sert de
+filet de secours à `dotenv.config()` dans `global-setup.js`/`setup-env.js`,
+qui recharge `DATABASE_URL` depuis ce fichier indépendamment de ce que
+`turbo` a transmis — masquant totalement le problème sur toute machine de
+développement où ce fichier existe.
+**Impact** : aucune régression n'a jamais été détectée par CI depuis sa mise
+en place — chaque `git push`/PR affichait un badge rouge sur l'étape `Tests`,
+ce qui, en pratique, revient à n'avoir aucune CI fonctionnelle malgré un
+pipeline qui « existe » dans le dépôt.
+**Risque** : élevé — invalide la prémisse de `docs/deployment/CI-CD.md`
+(« `test:tenant`, règle CLAUDE.md la plus critique, est bien exécuté et
+bloquant ») : `test:tenant` était en réalité `skipped` sur chaque run, car
+l'étape `Tests` précédente échouait toujours en premier.
+**Fichier(s)** : `turbo.json` (absence totale de `env`/`globalEnv`/`passThroughEnv`)
+**Solution** : `globalPassThroughEnv` ajouté à `turbo.json`, listant les
+variables runtime nécessaires (`DATABASE_URL`, `IDENTITY_DATABASE_URL`,
+`TENANT_DATABASE_URL`, secrets JWT/MFA/webhooks, etc.) —
+`passThroughEnv` plutôt que `env`/`globalEnv` pour ne pas faire participer
+des valeurs secrètes au hash de cache Turborepo. **Vérifié réellement, pas
+supposé** : reproduction locale de l'échec exact (déplacement temporaire de
+`apps/api/.env` + `turbo run test --filter=@erp/api` avec uniquement les
+variables façon CI dans le shell → même erreur `DATABASE_URL manquant`),
+puis confirmation que le correctif résout ce cas précis (60/60 suites,
+328/328 tests, `.env` toujours absent) avant restauration du fichier et
+re-vérification complète de la chaîne standard (`typecheck`/`lint`/`build`/
+`test`/`test:tenant`, tous verts). **Non encore confirmé** : le premier run
+réel sur GitHub Actions après ce correctif (nécessite un accès `gh`
+authentifié ou une vérification manuelle post-push, non disponible au moment
+de la rédaction de cette note).
+**Priorité** : P0 — était le blocage le plus critique de toute la Phase 10/9.5
+**Statut** : CORRIGÉ EN LOCAL (2026-08-17) — confirmation GitHub Actions en attente
+
+---
+
 ## Ce qui est solide (vérifié positivement)
 
 - **Docker** (`apps/api/Dockerfile`, `apps/web/Dockerfile`) : build
@@ -313,12 +365,13 @@ commentaire explicite sur la nature de ces valeurs.
   (`nestjs`/`nextjs`, uid/gid 1001), aucun secret en dur dans les Dockerfiles
   (`NEXT_PUBLIC_API_URL` correctement passé en `--build-arg`, tout le reste
   en variables d'environnement runtime via `docker-compose.prod.yml`).
-- **CI** (`.github/workflows/ci.yml`) : exécute réellement
+- **CI** (`.github/workflows/ci.yml`) : le fichier définit bien
   `install → prisma generate → typecheck → lint → build → test → test:tenant`
-  dans cet ordre, sur chaque push/PR vers `main`, avec un vrai service
-  Postgres — correspond exactement à ce que revendique
-  `docs/deployment/CI-CD.md`. `test:tenant` (règle CLAUDE.md la plus
-  critique du projet) est bien exécuté et bloquant.
+  dans cet ordre — mais cette lecture de fichier avait été prise, à tort,
+  comme preuve que le pipeline fonctionnait réellement. **Corrigé et
+  reclassé** : voir P-10, le pipeline avait en réalité échoué à 100% des
+  exécutions réelles sur GitHub Actions depuis sa création (Phase 10.2)
+  jusqu'au correctif du 2026-08-17.
 - **Sauvegardes/restauration** : chiffrement `age` réellement implémenté
   (pas de mention de clé privée dans aucun script ni fichier d'env commité),
   séparation clé publique (VPS) / clé privée (opérateur, jamais sur le
