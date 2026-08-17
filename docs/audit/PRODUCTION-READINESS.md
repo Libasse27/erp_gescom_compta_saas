@@ -21,7 +21,7 @@
 | # | Sujet | Verdict |
 |---|-------|---------|
 | 4 | Docker | Partiel — multi-stage OK, non-root OK, pas de secret en dur OK, healthcheck API OK ; **pas de healthcheck `web`, aucune limite CPU/mémoire nulle part** |
-| 5 | CI/CD | Partiel — pipeline complet, correctif P-10 appliqué et vérifié en local (échouait à 100% des runs GitHub Actions avant ça, jamais détecté) — **premier run réel post-correctif à confirmer** ; **aucun scan sécurité (SCA/secrets/SAST/image/IaC), pas de CD, pas de staging/E2E, protection de branche non activée** |
+| 5 | CI/CD | Partiel — pipeline complet et **réellement vert sur GitHub Actions depuis le correctif du 2026-08-17** (run #6, P-10 : échouait à 100% des runs avant ça, jamais détecté) ; **aucun scan sécurité (SCA/secrets/SAST/image/IaC), pas de CD, pas de staging/E2E, protection de branche non activée** |
 | 6 | Backup/restore | Oui — chiffrement `age` réel (clé privée jamais sur le VPS), restauration réellement exercée avec preuve technique détaillée ; **RPO/RTO non formalisés en chiffres** |
 | 7 | Logs + /health | Partiel — corrélation `requestId`/`tenantId`/`userId` réelle et testée, pas de fuite de secret constatée ; **un seul `/health`, pas de `/health/live` + `/health/ready` séparés** |
 | 8 | HTTPS/Caddy | Oui — HTTPS auto + redirection HTTP→HTTPS vérifiées (mode `tls internal`), CORS en liste blanche, helmet actif |
@@ -349,12 +349,14 @@ variables façon CI dans le shell → même erreur `DATABASE_URL manquant`),
 puis confirmation que le correctif résout ce cas précis (60/60 suites,
 328/328 tests, `.env` toujours absent) avant restauration du fichier et
 re-vérification complète de la chaîne standard (`typecheck`/`lint`/`build`/
-`test`/`test:tenant`, tous verts). **Non encore confirmé** : le premier run
-réel sur GitHub Actions après ce correctif (nécessite un accès `gh`
-authentifié ou une vérification manuelle post-push, non disponible au moment
-de la rédaction de cette note).
+`test`/`test:tenant`, tous verts). **Confirmé sur GitHub Actions** : run
+#6 (commit `c0cbd54`, https://github.com/Libasse27/erp_gescom_compta_saas/actions/runs/32021000646),
+premier run vert de l'histoire du dépôt — les 15 étapes réussies, y compris
+« Tests d'isolation multi-tenant (bloquant) » qui n'avait, jusque-là, jamais
+pu s'exécuter une seule fois (toujours `skipped` après l'échec de l'étape
+`Tests` précédente).
 **Priorité** : P0 — était le blocage le plus critique de toute la Phase 10/9.5
-**Statut** : CORRIGÉ EN LOCAL (2026-08-17) — confirmation GitHub Actions en attente
+**Statut** : CORRIGÉ (2026-08-17), vérifié en local et sur GitHub Actions
 
 ---
 
