@@ -9,8 +9,12 @@ FROM node:20-alpine AS base
 # version fournie par node:20-alpine embarquait des CVE connues (dont une
 # CRITICAL sur tar, CVE-2026-59873) détectées par le scan Trivy de l'image
 # en CI (P-01, voir apps/api/Dockerfile pour le contexte complet). Jamais
-# invoquées par notre code, mais présentes dans l'image scannée.
-RUN npm install -g npm@latest
+# invoquées par notre code, mais présentes dans l'image scannée. Version
+# épinglée (pas `npm@latest`, passé en npm 12 qui exige Node >=22 —
+# incompatible avec node:20-alpine, fait échouer ce `RUN`, vécu en
+# vérifiant ce correctif). 10.9.9 = dernière version 10.x, compatible
+# Node >=20.5.0, tar/glob/minimatch déjà corrigés en interne.
+RUN npm install -g npm@10.9.9
 RUN corepack enable
 RUN npm install -g turbo@2.1.3
 

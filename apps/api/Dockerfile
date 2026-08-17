@@ -18,8 +18,13 @@ RUN apk add --no-cache libc6-compat openssl
 # CRITICAL sur tar, CVE-2026-59873) détectées par le scan Trivy de l'image
 # en CI (P-01). Jamais invoquées par notre code (seul `node dist/main.js`
 # tourne au runtime), mais présentes dans l'image scannée — mise à jour
-# explicite plutôt que d'ignorer le résultat du scan.
-RUN npm install -g npm@latest
+# explicite plutôt que d'ignorer le résultat du scan. Version épinglée
+# (pas `npm@latest`) : `latest` est passé en npm 12, qui exige Node >=22 —
+# incompatible avec node:20-alpine et fait échouer ce `RUN` (vécu en
+# vérifiant ce correctif sur GitHub Actions). 10.9.9 est la dernière
+# version de la branche 10.x, compatible Node >=20.5.0, avec tar/glob/
+# minimatch déjà corrigés en interne.
+RUN npm install -g npm@10.9.9
 RUN corepack enable
 RUN npm install -g turbo@2.1.3
 
