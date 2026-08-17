@@ -42,6 +42,12 @@ RUN pnpm turbo run build --filter=@erp/web...
 FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+# npm/npx ne sont jamais invoqués au runtime (sortie standalone Next.js,
+# self-suffisante — voir COPY ci-dessous) — supprimés plutôt que rustinés
+# version par version : leurs dépendances internes bundlées (sigstore,
+# tuf-js...) ne sont pas toutes à jour même dans la dernière version 10.x
+# (P-01, Trivy). Voir apps/api/Dockerfile pour le contexte complet.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001 -G nodejs
 # Pas de apps/web/public/ pour l'instant (aucun asset statique) — à
 # réintroduire ici (COPY --from=builder /app/apps/web/public ./apps/web/public)

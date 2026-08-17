@@ -54,6 +54,14 @@ RUN pnpm turbo run build --filter=@erp/api...
 FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+# npm n'est jamais invoqué au runtime (seul `node dist/main.js` tourne) —
+# pnpm reste nécessaire (via corepack, resté actif) pour `docker compose run
+# api pnpm ... prisma migrate deploy` (scripts/prod-post-deploy.sh), mais
+# npm lui-même non. Supprimé plutôt que rustiné version par version : ses
+# dépendances internes bundlées (sigstore, tuf-js...) ne sont pas toutes à
+# jour même dans la dernière version 10.x (P-01, Trivy) — les supprimer
+# élimine la surface d'attaque au lieu de la patcher au cas par cas.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 RUN addgroup -g 1001 -S nodejs && adduser -S nestjs -u 1001 -G nodejs
 COPY --from=builder --chown=nestjs:nodejs /app .
 USER nestjs
