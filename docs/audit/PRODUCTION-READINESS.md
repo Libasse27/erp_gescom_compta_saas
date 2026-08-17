@@ -20,10 +20,10 @@
 
 | # | Sujet | Verdict |
 |---|-------|---------|
-| 4 | Docker | Partiel — multi-stage OK, non-root OK, pas de secret en dur OK, healthcheck API OK ; **pas de healthcheck `web`, aucune limite CPU/mémoire nulle part** |
-| 5 | CI/CD | Partiel — pipeline complet et **réellement vert sur GitHub Actions depuis le correctif du 2026-08-17** (run #6, P-10 : échouait à 100% des runs avant ça, jamais détecté) ; **aucun scan sécurité (SCA/secrets/SAST/image/IaC), pas de CD, pas de staging/E2E, protection de branche non activée** |
-| 6 | Backup/restore | Oui — chiffrement `age` réel (clé privée jamais sur le VPS), restauration réellement exercée avec preuve technique détaillée ; **RPO/RTO non formalisés en chiffres** |
-| 7 | Logs + /health | Partiel — corrélation `requestId`/`tenantId`/`userId` réelle et testée, pas de fuite de secret constatée ; **un seul `/health`, pas de `/health/live` + `/health/ready` séparés** |
+| 4 | Docker | **Corrigé le 2026-08-17** — multi-stage OK, non-root OK, pas de secret en dur OK, healthcheck API OK, healthcheck `web` ajouté (P-05), limites CPU/mémoire sur les 4 services ajoutées (P-04) |
+| 5 | CI/CD | Partiel — pipeline complet et **réellement vert sur GitHub Actions depuis le correctif du 2026-08-17** (run #6, P-10 : échouait à 100% des runs avant ça, jamais détecté) ; build Docker api/web ajouté en CI (P-02) ; **scan sécurité (SCA/secrets/SAST/image) toujours absent, pas de CD, pas de staging/E2E, protection de branche toujours non activée** (P-01, P-03 restent OUVERT) |
+| 6 | Backup/restore | Oui — chiffrement `age` réel (clé privée jamais sur le VPS), restauration réellement exercée avec preuve technique détaillée ; **RPO/RTO formalisés le 2026-08-17** (P-07), validation métier du chiffre encore à faire |
+| 7 | Logs + /health | **Corrigé le 2026-08-17** — corrélation `requestId`/`tenantId`/`userId` réelle et testée, pas de fuite de secret constatée, `/health/live` + `/health/ready` séparés (P-06) |
 | 8 | HTTPS/Caddy | Oui — HTTPS auto + redirection HTTP→HTTPS vérifiées (mode `tls internal`), CORS en liste blanche, helmet actif |
 | 9 | Monitoring/alerting | **Non** — rien au-delà logs + health, aucun outil de métriques/erreurs/alerting |
 | 10 | Secrets committés | Non trouvé — recherche large sans résultat concluant, `.env.prod` correctement ignoré |
@@ -75,7 +75,10 @@ images.
 **Solution** : ajouter une étape `docker build` (sans push) pour les deux
 Dockerfiles dans le job CI, en complément du scan d'image de P-01.
 **Priorité** : P2
-**Statut** : OUVERT
+**Statut** : CORRIGÉ (2026-08-17) — `docker build` direct (pas d'action
+tierce) ajouté pour `apps/api/Dockerfile` et `apps/web/Dockerfile` dans
+`.github/workflows/ci.yml`, après `test:tenant`. Scan de l'image obtenue
+(Trivy) toujours ouvert, voir P-01.
 
 ---
 
@@ -106,7 +109,11 @@ et vérifier son état actuel via `gh api repos/.../branches/main/protection`.
 **Priorité** : P1 (protection de branche — ne coûte rien, à faire
 immédiatement) / P3 (CD complet — dépend du provisioning VPS, hors
 périmètre code)
-**Statut** : OUVERT
+**Statut** : OUVERT — vérifié le 2026-08-17 : `gh` n'est pas authentifié
+dans cet environnement (`gh auth status` → non connecté), impossible
+d'activer la protection de branche par API depuis ici. Reste à faire
+manuellement (GitHub → Settings → Branches) ou via `gh auth login` +
+`gh api repos/.../branches/main/protection` par un mainteneur habilité.
 
 ---
 
@@ -132,7 +139,12 @@ RAM du VPS retenu, `caddy` : 128M/0.25 vCPU) via `deploy.resources.limits`
 (Compose v2) ou `mem_limit`/`cpus` selon la version de Docker Compose
 utilisée sur le VPS cible.
 **Priorité** : P1 — à faire avant le premier déploiement réel, pas après.
-**Statut** : OUVERT
+**Statut** : CORRIGÉ (2026-08-17) — `mem_limit`/`cpus` (pas
+`deploy.resources.limits`, ignoré hors Swarm par `docker compose up`)
+définis sur les 4 services dans `docker-compose.prod.yml`, valeurs par
+défaut conservatrices, overridables via `docker/.env.prod`. Dimensionnement
+définitif (notamment `postgres`) toujours à ajuster une fois le VPS cible
+réel connu.
 
 ---
 
@@ -158,7 +170,9 @@ réplication ni failover de toute façon à ce stade).
 (`node -e "require('http').get('http://localhost:3001/login', ...)"` ou une
 route dédiée), cohérent avec l'absence de `curl`/`wget` dans l'image Alpine.
 **Priorité** : P3
-**Statut** : OUVERT
+**Statut** : CORRIGÉ (2026-08-17) — healthcheck `web` ajouté dans
+`docker-compose.prod.yml`, sonde Node sur `GET /login`, même approche que
+`api`.
 
 ---
 
@@ -192,7 +206,10 @@ répond `200` tant que le process Node tourne) et `GET /health/ready`
 (vérifie Postgres, comportement actuel de `/health`) — conserver `/health`
 en alias de `/health/ready` pour compatibilité si nécessaire.
 **Priorité** : P2
-**Statut** : OUVERT
+**Statut** : CORRIGÉ (2026-08-17) — `GET /health/live` (aucune dépendance
+externe) et `GET /health/ready` (vérifie Postgres) ajoutés dans
+`health.controller.ts` ; `GET /health` conservé en alias de `/health/ready`,
+toujours branché sur le healthcheck Docker `api` existant.
 
 ---
 
@@ -230,7 +247,11 @@ validées — éventuellement via une réplication en continu ou des sauvegardes
 plus fréquentes si le RPO cible est inférieur à 24h) ; chronométrer la
 prochaine restauration exercée pour obtenir un RTO mesuré, pas estimé.
 **Priorité** : P2
-**Statut** : OUVERT
+**Statut** : CORRIGÉ partiellement (2026-08-17) — RPO cible (24h, déduit de
+la cadence actuelle) et RTO (non chronométré, à mesurer au prochain exercice
+réel) formalisés dans `docs/deployment/BACKUPS.md` §RPO/RTO. Validation
+métier explicite (le RPO 24h est-il acceptable pour les écritures
+comptables ?) toujours à faire, cf. `docs/audit/ACCOUNTING-AUDIT.md`.
 
 ---
 

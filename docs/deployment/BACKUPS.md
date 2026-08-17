@@ -181,3 +181,25 @@ image `api` déjà construite en Phase 10.1), secrets jetables générés dans u
      `pg_restore --clean` porté sur une seule base.
 7. Stack éteinte proprement (`down -v`), `docker/.env.prod` et les dumps de
    test supprimés — rien de tout cela n'a été commité.
+
+## RPO / RTO (P-07)
+
+Aucun chiffre n'était formellement énoncé jusqu'ici — seule la cadence de
+sauvegarde permettait d'en déduire un RPO implicite, jamais validé comme
+objectif métier. Formalisation minimale, à réviser avec le métier avant tout
+trafic de production réel (données comptables/facturation en jeu) :
+
+- **RPO cible : 24h**, déduit directement de la cadence quotidienne (3h du
+  matin, `Africa/Dakar`) documentée ci-dessus. C'est un défaut technique par
+  cadence, pas un arbitrage métier explicite — une perte de 24h de
+  facturation peut être inacceptable pour certains tenants ; si le métier
+  exige moins, la seule option avec l'architecture actuelle (sauvegarde
+  logique `pg_dump`) est d'augmenter la fréquence des dumps, pas de réduire
+  le RPO à budget d'infrastructure constant (pas de réplication en continu
+  en place, voir `docs/deployment/PRODUCTION.md` §Montée en charge).
+- **RTO cible : non chronométré.** La procédure de restauration ci-dessus a
+  été exécutée et vérifiée avec succès (RLS incluse), mais sa durée n'a pas
+  été mesurée lors de cet exercice. À chronométrer lors du prochain exercice
+  de restauration réel (`date` avant/après `scripts/db-restore.sh`) pour
+  obtenir un RTO mesuré plutôt qu'estimé, avant de le communiquer comme
+  engagement.
