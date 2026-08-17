@@ -4,6 +4,13 @@
 # fournie en --build-arg, pas seulement en variable d'environnement runtime.
 
 FROM node:20-alpine AS base
+# npm embarque ses propres dépendances internes (tar, glob, minimatch,
+# cross-spawn, brace-expansion, ip-address, sigstore, picomatch) — la
+# version fournie par node:20-alpine embarquait des CVE connues (dont une
+# CRITICAL sur tar, CVE-2026-59873) détectées par le scan Trivy de l'image
+# en CI (P-01, voir apps/api/Dockerfile pour le contexte complet). Jamais
+# invoquées par notre code, mais présentes dans l'image scannée.
+RUN npm install -g npm@latest
 RUN corepack enable
 RUN npm install -g turbo@2.1.3
 

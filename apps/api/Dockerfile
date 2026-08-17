@@ -12,6 +12,14 @@ FROM node:20-alpine AS base
 # moteur ciblant la mauvaise version d'OpenSSL, qui plante silencieusement
 # au runtime (erreur non-JSON, vécu en vérifiant cette Phase 10.1).
 RUN apk add --no-cache libc6-compat openssl
+# npm embarque ses propres dépendances internes (tar, glob, minimatch,
+# cross-spawn, brace-expansion, ip-address, sigstore, picomatch) — la
+# version fournie par node:20-alpine embarquait des CVE connues (dont une
+# CRITICAL sur tar, CVE-2026-59873) détectées par le scan Trivy de l'image
+# en CI (P-01). Jamais invoquées par notre code (seul `node dist/main.js`
+# tourne au runtime), mais présentes dans l'image scannée — mise à jour
+# explicite plutôt que d'ignorer le résultat du scan.
+RUN npm install -g npm@latest
 RUN corepack enable
 RUN npm install -g turbo@2.1.3
 
