@@ -78,6 +78,15 @@ jobs:
       - name: Installer les dépendances
         run: pnpm install --frozen-lockfile
 
+      # P-01 (docs/audit/PRODUCTION-READINESS.md) : SCA bloquant, mais
+      # seulement sur les avis high/critical avec correctif publié — voir
+      # scripts/ci-audit-gate.sh pour le raisonnement (deux avis image-size
+      # pré-existants, dépendance de build de apps/mobile, sans aucun
+      # correctif disponible aujourd'hui, ne doivent pas rendre la CI
+      # rouge en permanence).
+      - name: Audit de sécurité des dépendances (bloquant)
+        run: bash scripts/ci-audit-gate.sh
+
       # @prisma/client ne trouve pas toujours le schéma (apps/api/prisma/
       # schema.prisma) depuis le postinstall exécuté à la racine du
       # monorepo — génération explicite, requise avant tout typecheck/build
