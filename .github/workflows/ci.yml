@@ -32,7 +32,7 @@ env:
   JWT_ACCESS_SECRET: ci-jwt-access-secret-at-least-32-characters-long
   JWT_ACCESS_TTL: 15m
   JWT_REFRESH_TTL: 30d
-  MFA_ENCRYPTION_KEY: ci-mfa-encryption-key-at-least-32-characters
+  MFA_ENCRYPTION_KEY: ci-mfa-encryption-key-at-least-32-characters # gitleaks:allow — valeur de dev fixe, voir P-09 docs/audit/PRODUCTION-READINESS.md
   PAYMENT_WEBHOOK_SECRET_WAVE: ci-webhook-secret-wave
   PAYMENT_WEBHOOK_SECRET_ORANGE_MONEY: ci-webhook-secret-orange-money
   PAYMENT_WEBHOOK_SECRET_FREE_MONEY: ci-webhook-secret-free-money
@@ -61,8 +61,34 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
+      # fetch-depth: 0 (historique complet) — nécessaire à gitleaks
+      # ci-dessous : un secret commité puis "supprimé" dans un commit
+      # suivant reste lisible dans l'historique, un checkout superficiel
+      # (défaut : 1 commit) ne le verrait jamais.
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # P-01 (docs/audit/PRODUCTION-READINESS.md) : scan de secrets, absent
+      # jusqu'ici. Binaire officiel téléchargé et vérifié par checksum plutôt
+      # qu'une Action tierce (gitleaks/gitleaks-action) — même logique que le
+      # `docker build` direct de P-02 : zéro action GitHub marketplace
+      # supplémentaire à faire confiance. Scanne tout l'historique (comme
+      # testé en local, 111 commits ~2s) : un secret retiré dans un commit
+      # ultérieur reste détecté.
+      - name: Installer gitleaks
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        run: |
+          curl -sL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo mv gitleaks /usr/local/bin/gitleaks
+
+      - name: Scan de secrets (bloquant)
+        run: gitleaks detect --source . --no-banner --redact
 
       - name: Installer pnpm
         uses: pnpm/action-setup@v4

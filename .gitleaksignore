@@ -1,0 +1,12 @@
+# Faux positifs connus, un fingerprint gitleaks par ligne
+# (commit:fichier:règle:ligne). Ne PAS ajouter une entrée ici pour un vrai
+# secret — voir docs/audit/PRODUCTION-READINESS.md P-09 pour le contexte de
+# chaque exception.
+
+# MFA_ENCRYPTION_KEY de dev, valeur fixe jamais utilisée hors CI/local
+# (docker-compose.dev.yml). Un commentaire `gitleaks:allow` a été ajouté sur
+# la ligne actuelle de .github/workflows/ci.yml, mais ce commit historique
+# (avant l'ajout du commentaire) reste dans le log git scanné par
+# `gitleaks detect` — fingerprint ignoré explicitement plutôt qu'une
+# allowlist regex large qui masquerait aussi de vrais secrets futurs.
+412fc853b81abf3de4bc08c77ae1d4bf9554a397:.github/workflows/ci.yml:generic-api-key:31
