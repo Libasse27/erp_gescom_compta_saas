@@ -7,11 +7,20 @@
 # (heureusement le volume nommé, distinct, a survécu).
 name: erp_saas_prod
 
+# P-04 (docs/audit/PRODUCTION-READINESS.md) : `mem_limit`/`cpus` plutôt que
+# `deploy.resources.limits` — ce dernier n'est honoré qu'en mode Swarm
+# (`docker stack deploy`), ignoré silencieusement par `docker compose up`
+# tel qu'utilisé ici (scripts/prod-post-deploy.sh). Valeurs par défaut
+# conservatrices pour un VPS mutualisé (docs/deployment/PRODUCTION.md),
+# overridables sans modifier ce fichier via docker/.env.prod
+# (POSTGRES_MEM_LIMIT, API_MEM_LIMIT, ...) une fois le VPS cible connu.
 services:
   postgres:
     image: postgres:16-alpine
     container_name: erp_saas_postgres_prod
     restart: unless-stopped
+    mem_limit: ${POSTGRES_MEM_LIMIT:-1024m}
+    cpus: ${POSTGRES_CPU_LIMIT:-1.0}
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -32,6 +41,8 @@ services:
       dockerfile: apps/api/Dockerfile
     container_name: erp_saas_api_prod
     restart: unless-stopped
+    mem_limit: ${API_MEM_LIMIT:-512m}
+    cpus: ${API_CPU_LIMIT:-1.0}
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,12 +97,31 @@ services:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
     container_name: erp_saas_web_prod
     restart: unless-stopped
+    mem_limit: ${WEB_MEM_LIMIT:-256m}
+    cpus: ${WEB_CPU_LIMIT:-0.5}
     depends_on:
       - api
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
     # Même remarque que le service api : pas de port publié, Caddy joint ce
     # service par son nom sur le réseau Docker interne.
+    # GET /login (P-05, docs/audit/PRODUCTION-READINESS.md) : pas de route
+    # /health côté web, /login est la page publique la plus légère à rendre
+    # (pas de dépendance API bloquante côté SSR) — détecte un SSR qui répond
+    # mais sert des pages cassées (ex. 500 systématique), pas juste un crash
+    # process. Même approche que api : pas de curl/wget dans l'image Alpine.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:3001/login',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - erp_saas_prod
 
@@ -103,6 +133,8 @@ services:
     image: caddy:2-alpine
     container_name: erp_saas_caddy_prod
     restart: unless-stopped
+    mem_limit: ${CADDY_MEM_LIMIT:-128m}
+    cpus: ${CADDY_CPU_LIMIT:-0.25}
     depends_on:
       - api
       - web

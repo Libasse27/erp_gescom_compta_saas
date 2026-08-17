@@ -110,8 +110,23 @@ fois le VPS provisionné (ligne crontab documentée dans ce fichier).
 ## Logs et santé
 
 `docs/deployment/LOGGING.md` — logs JSON structurés corrélés par
-`requestId`/`tenantId`, `GET /health` (healthcheck Docker déjà branché sur
-`api`).
+`requestId`/`tenantId`. Trois routes de sonde (P-06, hors préfixe `/v1`) :
+`GET /health/live` (aucune dépendance externe, sert à décider un
+redémarrage), `GET /health/ready` (vérifie Postgres, sert à décider une
+sortie de rotation), `GET /health` (alias de `/health/ready`, conservé pour
+compatibilité — c'est lui que le healthcheck Docker de `api` utilise
+aujourd'hui).
+
+## Limites de ressources (P-04)
+
+`docker-compose.prod.yml` définit `mem_limit`/`cpus` sur les 4 services
+(`postgres`, `api`, `web`, `caddy`) — pas `deploy.resources.limits`, ignoré
+par `docker compose up` hors mode Swarm. Valeurs par défaut conservatrices
+pour un VPS mutualisé (`postgres` 1024M/1 vCPU, `api` 512M/1 vCPU, `web`
+256M/0.5 vCPU, `caddy` 128M/0.25 vCPU), overridables sans toucher au fichier
+via `docker/.env.prod` (`POSTGRES_MEM_LIMIT`, `API_MEM_LIMIT`, ...) une fois
+le VPS cible connu et son RAM/CPU réels disponibles pour dimensionner
+correctement, en particulier `postgres`.
 
 ## CI/CD
 
