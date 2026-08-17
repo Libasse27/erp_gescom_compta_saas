@@ -1,7 +1,13 @@
 import { Controller, Get, ServiceUnavailableException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 
-interface HealthReport {
+interface LivenessReport {
+  status: "ok";
+  uptimeSeconds: number;
+  timestamp: string;
+}
+
+interface ReadinessReport {
   status: "ok" | "error";
   database: "ok" | "error";
   uptimeSeconds: number;
@@ -14,14 +20,34 @@ interface HealthReport {
 // stable indépendamment du versionnage de l'API, comme les webhooks de
 // paiement. Consommée par le healthcheck Docker (docker-compose.prod.yml)
 // et, plus tard, par un load balancer/reverse proxy (Phase 10.6).
+//
+// /health/live et /health/ready sont distincts (P-06, docs/audit/PRODUCTION-READINESS.md) :
+// liveness ne vérifie aucune dépendance externe (sert à décider un
+// redémarrage du process), readiness vérifie Postgres (sert à décider une
+// sortie de rotation). /health reste un alias de /health/ready pour ne pas
+// casser le healthcheck Docker existant.
 @Controller("health")
 export class HealthController {
   constructor(private readonly prisma: PrismaService) {}
 
+  @Get("live")
+  live(): LivenessReport {
+    return { status: "ok", uptimeSeconds: process.uptime(), timestamp: new Date().toISOString() };
+  }
+
+  @Get("ready")
+  async ready(): Promise<ReadinessReport> {
+    return this.buildReadinessReport();
+  }
+
   @Get()
-  async check(): Promise<HealthReport> {
+  async check(): Promise<ReadinessReport> {
+    return this.buildReadinessReport();
+  }
+
+  private async buildReadinessReport(): Promise<ReadinessReport> {
     const database = await this.checkDatabase();
-    const report: HealthReport = {
+    const report: ReadinessReport = {
       status: database === "ok" ? "ok" : "error",
       database,
       uptimeSeconds: process.uptime(),

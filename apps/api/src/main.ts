@@ -47,8 +47,11 @@ async function bootstrap() {
     exclude: [
       { path: "webhooks/payments/:provider", method: RequestMethod.ALL },
       // Une sonde d'infra (healthcheck Docker, load balancer) ne doit pas
-      // dépendre du versionnage interne de l'API (Phase 10.5).
+      // dépendre du versionnage interne de l'API (Phase 10.5). /health/live
+      // et /health/ready (P-06) suivent la même règle que l'alias /health.
       { path: "health", method: RequestMethod.GET },
+      { path: "health/live", method: RequestMethod.GET },
+      { path: "health/ready", method: RequestMethod.GET },
     ],
   });
 

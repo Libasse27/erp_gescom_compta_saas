@@ -24,4 +24,27 @@ describe("HealthController", () => {
 
     await expect(controller.check()).rejects.toThrow(ServiceUnavailableException);
   });
+
+  it("liveness never checks the database and always returns ok", () => {
+    const controller = buildController(() => Promise.reject(new Error("connection refused")));
+
+    const report = controller.live();
+
+    expect(report).toMatchObject({ status: "ok" });
+    expect(typeof report.uptimeSeconds).toBe("number");
+  });
+
+  it("readiness mirrors check(): ok when the database responds", async () => {
+    const controller = buildController(() => Promise.resolve([{ "?column?": 1 }]));
+
+    const report = await controller.ready();
+
+    expect(report).toMatchObject({ status: "ok", database: "ok" });
+  });
+
+  it("readiness throws a 503 when the database is unreachable", async () => {
+    const controller = buildController(() => Promise.reject(new Error("connection refused")));
+
+    await expect(controller.ready()).rejects.toThrow(ServiceUnavailableException);
+  });
 });
