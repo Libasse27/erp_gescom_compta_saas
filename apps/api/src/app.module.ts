@@ -1,6 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_FILTER, APP_GUARD } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
+import { SentryGlobalFilter, SentryModule } from "@sentry/nestjs/setup";
 import { PrismaModule } from "./prisma/prisma.module";
 import { AccountingModule } from "./accounting/accounting.module";
 import { AuditLogModule } from "./common/audit/audit-log.module";
@@ -34,6 +35,12 @@ import { HttpLoggingMiddleware } from "./common/logging/http-logging.middleware"
 
 @Module({
   imports: [
+    // P-08 (docs/audit/PRODUCTION-READINESS.md) : SentryModule doit être le
+    // tout premier import (recommandation officielle @sentry/nestjs) — mais
+    // n'existe même pas dans le graphe de modules si SENTRY_DSN est absent
+    // (désactivé par défaut, voir src/instrument.ts et
+    // docs/deployment/MONITORING.md).
+    ...(process.env.SENTRY_DSN ? [SentryModule.forRoot()] : []),
     // Limite globale par défaut ; /auth/* applique une limite plus stricte
     // via @Throttle (CLAUDE.md §6).
     ThrottlerModule.forRoot([GLOBAL_RATE_LIMIT]),
@@ -64,7 +71,15 @@ import { HttpLoggingMiddleware } from "./common/logging/http-logging.middleware"
     AccountingModule,
     ReportsModule,
   ],
-  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Rapporte à Sentry les exceptions non gérées puis délègue au filtre
+    // Nest par défaut (SentryGlobalFilter étend BaseExceptionFilter) — ne
+    // change donc pas la forme des réponses HTTP existantes (400/403/404...),
+    // ajoute seulement la capture des erreurs inattendues. Absent du graphe
+    // si SENTRY_DSN n'est pas renseigné (même garde que SentryModule ci-dessus).
+    ...(process.env.SENTRY_DSN ? [{ provide: APP_FILTER, useClass: SentryGlobalFilter }] : []),
+  ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

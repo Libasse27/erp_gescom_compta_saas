@@ -68,6 +68,10 @@ services:
       PAYMENT_WEBHOOK_SECRET_CARD: ${PAYMENT_WEBHOOK_SECRET_CARD}
       PAYMENT_GRACE_PERIOD_DAYS: ${PAYMENT_GRACE_PERIOD_DAYS}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+      # P-08 (docs/audit/PRODUCTION-READINESS.md) : optionnel, désactivé par
+      # défaut (voir apps/api/src/instrument.ts) — vide si non renseigné dans
+      # docker/.env.prod, docs/deployment/MONITORING.md.
+      SENTRY_DSN: ${SENTRY_DSN:-}
     # Pas de port publié sur l'hôte (Phase 10.6, docs/adr/0017-...) : Caddy
     # est désormais le seul point d'entrée externe, il joint ce service par
     # son nom sur le réseau Docker interne (reverse_proxy api:3000).
@@ -103,6 +107,10 @@ services:
       - api
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      # P-08 (docs/audit/PRODUCTION-READINESS.md) : optionnel, désactivé par
+      # défaut (voir apps/web/src/instrumentation.ts) — vide si non renseigné
+      # dans docker/.env.prod, docs/deployment/MONITORING.md.
+      SENTRY_DSN: ${SENTRY_DSN:-}
     # Même remarque que le service api : pas de port publié, Caddy joint ce
     # service par son nom sur le réseau Docker interne.
     # GET /login (P-05, docs/audit/PRODUCTION-READINESS.md) : pas de route

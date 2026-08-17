@@ -1,3 +1,6 @@
+// Doit rester le tout premier import du fichier (voir src/instrument.ts).
+import "./instrument";
+
 import helmet from "helmet";
 import { NestFactory } from "@nestjs/core";
 import { Logger, RequestMethod } from "@nestjs/common";
