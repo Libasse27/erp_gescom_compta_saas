@@ -165,6 +165,41 @@ describe("InvoiceGenerationService", () => {
     expect(invoiceA.number).not.toBe(invoiceB.number);
   });
 
+  it("rejects a second invoice for the same payment at the database level (BIL-02)", async () => {
+    const { enterprise, subscription } = await createEnterpriseWithSubscription();
+    const paymentId = await createPayment(enterprise.id, subscription.id, 5_000);
+
+    const first = await prisma.$transaction((tx) =>
+      service.generateForPayment(tx, {
+        enterprise,
+        subscriptionId: subscription.id,
+        paymentId,
+        amount: 5_000,
+        currency: "XOF",
+      }),
+    );
+    expect(first.paymentId).toBe(paymentId);
+
+    // Simule une régression applicative qui rappellerait generateForPayment
+    // pour le même paiement (BIL-01 empêche déjà ce chemin depuis le
+    // webhook — ceci vérifie que la base refuse quand même, en dernier
+    // recours, plutôt que de dupliquer silencieusement la facture.
+    await expect(
+      prisma.$transaction((tx) =>
+        service.generateForPayment(tx, {
+          enterprise,
+          subscriptionId: subscription.id,
+          paymentId,
+          amount: 5_000,
+          currency: "XOF",
+        }),
+      ),
+    ).rejects.toThrow();
+
+    const invoices = await prisma.invoice.findMany({ where: { paymentId } });
+    expect(invoices).toHaveLength(1);
+  });
+
   it("stays gap-free and unique under concurrent generation for the same tenant", async () => {
     const { enterprise, subscription } = await createEnterpriseWithSubscription();
     const paymentIds = await Promise.all(

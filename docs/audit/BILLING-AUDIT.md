@@ -195,7 +195,17 @@ et écrit sur stdout (BIL-11).
   BIL-02 (garde base). Ajouter un test d'intégration lançant N livraisons en
   `Promise.all` et asseyant `invoices.length === 1`.
 - **Priorité** : P1 — avant toute mise en service d'un fournisseur réel
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-17) — la lecture hors transaction reste un
+  raccourci pour le cas courant (rejeu déjà traité), mais n'est plus la garantie :
+  `tx.payment.updateMany({ where: { id, status: "PENDING" }, data: {...} })`
+  à l'intérieur de la transaction ne peut réussir (`count === 1`) que pour une
+  seule livraison concurrente ; les autres obtiennent `count === 0` et
+  sortent en `ignored_already_processed` sans dupliquer abonnement ni
+  facture. Vérifié par un vrai test de concurrence (pas seulement séquentiel) :
+  5 livraisons du même événement envoyées simultanément via `Promise.all`
+  (`payments-webhook.integration.spec.ts`, "is idempotent under real
+  concurrency") — exactement 1 `processed`, 4 `ignored_already_processed`,
+  1 facture, 1 `SubscriptionEvent`.
 
 ### BIL-02
 
@@ -224,7 +234,18 @@ et écrit sur stdout (BIL-11).
   `Payment.providerReference` non nullable si toute création passe désormais par un
   flux de checkout. Migration non destructive à écrire et à tester en rollback (CLAUDE.md §4).
 - **Priorité** : P1
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-17) — migration additive et non destructive
+  `20260817020000_add_invoice_payment_unique_guard` : colonne `Invoice.paymentId`
+  (`String? @unique`), renseignée dans la même transaction que la création de
+  la facture (`invoice-generation.service.ts`). Une deuxième tentative de
+  facturation pour le même paiement lève désormais une violation de
+  contrainte unique Postgres au lieu de réaffecter silencieusement
+  `Payment.invoiceId` à la dernière facture créée. Vérifié par un test dédié
+  (`invoice-generation.service.spec.ts`, "rejects a second invoice for the
+  same payment at the database level") : deuxième appel rejeté, une seule
+  ligne `Invoice` en base pour ce `paymentId`. `Payment.providerReference`
+  reste nullable (non traité ici — hors périmètre de ce correctif, qui vise
+  la duplication de facture, pas la création de paiement).
 
 ### BIL-03
 

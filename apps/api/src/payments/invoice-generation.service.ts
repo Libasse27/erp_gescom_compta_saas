@@ -63,6 +63,10 @@ export class InvoiceGenerationService {
         status: "PAID",
         issuedAt: now,
         paidAt: now,
+        // paymentId (BIL-02) : garde d'unicité au niveau base — un deuxième
+        // appel pour le même paiement lève une violation de contrainte unique
+        // au lieu de créer silencieusement une facture en double.
+        paymentId: params.paymentId,
         payments: { connect: { id: params.paymentId } },
       },
     });

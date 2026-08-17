@@ -208,6 +208,39 @@ describe("PaymentsWebhookController (integration)", () => {
     expect(events).toHaveLength(1);
   });
 
+  it("is idempotent under real concurrency: N simultaneous deliveries of the same event produce exactly one invoice (BIL-01)", async () => {
+    const { enterprise, subscription } = await createEnterpriseWithActiveUser("TRIAL");
+    const { providerReference } = await createPendingPayment(enterprise.id, subscription.id);
+    const payload = { reference: providerReference, status: "succeeded", amount: 5_000, currency: "XOF" };
+
+    // Contrairement au test séquentiel ci-dessus, ceci reproduit le scénario
+    // réel visé par BIL-01 : plusieurs livraisons du même événement arrivent
+    // en même temps (rejeu en rafale d'un fournisseur Mobile Money sur
+    // timeout), pas l'une après l'autre. Avant le correctif, la lecture du
+    // statut du paiement hors transaction laissait passer plusieurs requêtes
+    // concurrentes, chacune générant sa propre facture.
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () => postWebhook("WAVE", payload, wave.secret).expect(200)),
+    );
+
+    const processedCount = results.filter((r) => r.body.outcome === "processed").length;
+    const ignoredCount = results.filter((r) => r.body.outcome === "ignored_already_processed").length;
+    expect(processedCount).toBe(1);
+    expect(ignoredCount).toBe(4);
+
+    const updatedPayment = await prisma.payment.findUniqueOrThrow({
+      where: { provider_providerReference: { provider: "WAVE", providerReference } },
+    });
+    expect(updatedPayment.status).toBe("SUCCEEDED");
+
+    const invoices = await prisma.invoice.findMany({ where: { enterpriseId: enterprise.id } });
+    expect(invoices).toHaveLength(1);
+    expect(invoices[0]!.paymentId).toBe(updatedPayment.id);
+
+    const events = await prisma.subscriptionEvent.findMany({ where: { subscriptionId: subscription.id } });
+    expect(events).toHaveLength(1);
+  });
+
   it("rejects a webhook with no signature header, without changing any state", async () => {
     const { enterprise, subscription } = await createEnterpriseWithActiveUser("TRIAL");
     const { paymentId, providerReference } = await createPendingPayment(enterprise.id, subscription.id);

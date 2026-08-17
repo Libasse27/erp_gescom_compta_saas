@@ -981,6 +981,9 @@ model Payment {
   subscription      Subscription?   @relation(fields: [subscriptionId], references: [id])
   invoiceId         String?         @map("invoice_id") @db.Uuid
   invoice           Invoice?        @relation(fields: [invoiceId], references: [id])
+  // Côté inverse de Invoice.paymentId (BIL-02) — pas de colonne FK ici, la
+  // clé étrangère vit sur Invoice.
+  invoiceGeneratedFor Invoice?      @relation("InvoicePayment")
   provider          PaymentProvider
   providerReference String?         @map("provider_reference")
   amount            Int
@@ -1005,6 +1008,12 @@ model Invoice {
   enterprise         Enterprise    @relation(fields: [enterpriseId], references: [id])
   subscriptionId     String?       @map("subscription_id") @db.Uuid
   subscription       Subscription? @relation(fields: [subscriptionId], references: [id])
+  // Garde d'unicité au niveau base (BIL-02, docs/audit/BILLING-AUDIT.md) : au
+  // plus une Invoice par Payment, même en cas de régression applicative future
+  // (BIL-01 protège déjà le chemin webhook, ceci est une défense en
+  // profondeur structurelle, pas la seule garantie).
+  paymentId          String?       @unique @map("payment_id") @db.Uuid
+  payment            Payment?      @relation("InvoicePayment", fields: [paymentId], references: [id])
   // Formatée à la génération (ex: "INV-<8 premiers caractères enterpriseId>-000123"),
   // construite à partir d'InvoiceCounter (Phase 5) — jamais un simple
   // auto-increment global, voir docs/PROMPT-MAITRE-SAAS.md Phase 3 §"numérotation

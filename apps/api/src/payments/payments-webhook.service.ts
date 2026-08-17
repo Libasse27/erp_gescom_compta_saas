@@ -68,16 +68,28 @@ export class PaymentWebhookService {
       throw new ConflictException("Paiement sans abonnement associé");
     }
 
-    let subscriptionAfter: Subscription;
+    let subscriptionAfter: Subscription | null;
     try {
       subscriptionAfter = await this.prisma.$transaction(async (tx) => {
-        const updatedPayment = await tx.payment.update({
-          where: { id: payment.id },
+        // Compare-and-swap atomique (BIL-01, docs/audit/BILLING-AUDIT.md) : la
+        // lecture faite plus haut (hors transaction) ne fait que court-circuiter
+        // le cas courant (rejeu déjà traité), elle n'est jamais la garantie
+        // d'unicité. Deux livraisons concurrentes du même événement peuvent
+        // toutes deux passer ce premier contrôle ; seule celle dont l'UPDATE
+        // matche encore status="PENDING" au moment de s'exécuter (verrouillage
+        // de ligne Postgres) obtient count=1 et poursuit — l'autre obtient
+        // count=0 et s'arrête ici, sans dupliquer l'abonnement ni la facture.
+        const { count } = await tx.payment.updateMany({
+          where: { id: payment.id, status: "PENDING" },
           data: {
             status: event.status,
             paidAt: event.status === "SUCCEEDED" ? new Date() : null,
           },
         });
+        if (count === 0) {
+          return null;
+        }
+        const updatedPayment = await tx.payment.findUniqueOrThrow({ where: { id: payment.id } });
 
         const subscription = await tx.subscription.findUniqueOrThrow({ where: { id: payment.subscriptionId! } });
         const enterprise = await tx.enterprise.findUniqueOrThrow({ where: { id: payment.enterpriseId } });
@@ -138,6 +150,13 @@ export class PaymentWebhookService {
         throw new ConflictException(error.message);
       }
       throw error;
+    }
+
+    if (subscriptionAfter === null) {
+      // Perdant du compare-and-swap (BIL-01) : une autre livraison concurrente
+      // du même événement a déjà tout traité (abonnement, facture, audit,
+      // notification) — ne pas dupliquer ces effets de bord.
+      return { outcome: "ignored_already_processed", paymentId: payment.id };
     }
 
     await this.auditLog.record({
