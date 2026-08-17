@@ -117,6 +117,14 @@ sortie de rotation), `GET /health` (alias de `/health/ready`, conservé pour
 compatibilité — c'est lui que le healthcheck Docker de `api` utilise
 aujourd'hui).
 
+## Monitoring et alerting (P-08)
+
+`docs/deployment/MONITORING.md` — tracking d'erreurs Sentry (désactivé par
+défaut, `SENTRY_DSN` optionnel) sur `api` et `web`, marche à suivre pour un
+moniteur d'uptime externe sur `/health/ready`. Métriques de
+latence/débit historisées (Prometheus/Grafana) toujours hors périmètre, à
+mettre en place avant un trafic de production réel significatif.
+
 ## Limites de ressources (P-04)
 
 `docker-compose.prod.yml` définit `mem_limit`/`cpus` sur les 4 services
