@@ -153,3 +153,26 @@ jobs:
 
       - name: Build de l'image Docker web (sans push)
         run: docker build -f apps/web/Dockerfile -t erp-web:ci --build-arg NEXT_PUBLIC_API_URL="$NEXT_PUBLIC_API_URL" .
+
+      # P-01 (docs/audit/PRODUCTION-READINESS.md) : scan des images obtenues
+      # ci-dessus, absent jusqu'ici. Binaire officiel téléchargé et vérifié
+      # par checksum plutôt qu'une Action tierce (aquasecurity/trivy-action) —
+      # même logique que gitleaks et le `docker build` direct de P-02.
+      # --ignore-unfixed : comme scripts/ci-audit-gate.sh (P-01, pnpm audit),
+      # ne bloque que sur les CVE qui ont un correctif réellement publié,
+      # jamais sur un paquet système sans fix disponible aujourd'hui.
+      - name: Installer trivy
+        env:
+          TRIVY_VERSION: "0.74.0"
+          TRIVY_SHA256: "2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a"
+        run: |
+          curl -sL -o trivy.tar.gz "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  trivy.tar.gz" | sha256sum -c -
+          tar -xzf trivy.tar.gz trivy
+          sudo mv trivy /usr/local/bin/trivy
+
+      - name: Scan de l'image Docker api (bloquant, HIGH/CRITICAL corrigeables)
+        run: trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 erp-api:ci
+
+      - name: Scan de l'image Docker web (bloquant, HIGH/CRITICAL corrigeables)
+        run: trivy image --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 erp-web:ci
