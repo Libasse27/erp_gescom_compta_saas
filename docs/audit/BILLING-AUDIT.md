@@ -640,7 +640,42 @@ et écrit sur stdout (BIL-11).
   revendiqués par l'ADR (panne à chaque étape de la transaction **et** en post-commit),
   et corriger l'ADR si le comportement retenu diffère de ce qu'elle décrit.
 - **Priorité** : P2
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-18) — deux mesures distinctes, décision produit
+  confirmée. (1) L'écriture d'audit `ENTERPRISE_PROVISIONED` a rejoint la
+  transaction Prisma existante : `AuditLogService.record()` accepte
+  désormais un second paramètre optionnel `tx: Prisma.TransactionClient`
+  (défaut `this.prisma`, tous les appels existants — BIL-01 à BIL-09 inclus
+  — inchangés). Elle ne peut structurellement plus manquer si l'entreprise
+  existe. (2) L'émission du jeton de vérification et l'envoi de l'email de
+  bienvenue restent hors transaction (nature : effets de bord non centraux)
+  mais sont désormais enveloppés dans un `try/catch` : une panne y est
+  journalisée (log structuré `error`) sans jamais faire échouer
+  l'inscription — l'endpoint répond toujours `201` avec des tokens valides.
+  Assumé sans risque fonctionnel aujourd'hui : `User.emailVerifiedAt` n'est
+  lu ni imposé nulle part dans le code (vérifié exhaustivement) — sa perte
+  reste cosmétique. `AuthService.issueTokenPair` reste, lui, bloquant (fait
+  partie du contrat de réponse `{ accessToken, refreshToken }`, pas
+  d'assouplissement du contrat public) ; en cas de panne résiduelle à cette
+  étape précise, le compte créé demeure utilisable via `/auth/login`,
+  filet de secours implicite déjà testé indépendamment. Aucune file
+  d'attente/relance construite : aucune infrastructure de queue (BullMQ/
+  Redis) n'existe dans ce projet à ce stade — en ajouter une pour ce seul
+  correctif aurait été disproportionné (CLAUDE.md §3, dépendance non
+  triviale). Aucune migration Prisma : le paramètre `tx` est un changement
+  de signature TypeScript uniquement.
+
+  Vérifié par 4 tests d'injection de panne
+  (`provisioning.integration.spec.ts`, technique `jest.spyOn` sur
+  l'instance réelle du service via `app.get(...)`, précédent déjà établi
+  par `subscription-lifecycle.integration.spec.ts`) : panne sur l'émission
+  du jeton de vérification → 201 avec tokens valides, entreprise/audit
+  bien créés ; panne sur l'envoi de la notification → même résultat ;
+  confirmation explicite que l'audit `ENTERPRISE_PROVISIONED` est déjà
+  présent immédiatement après le commit, sans fenêtre où il pourrait
+  manquer. Les 4 tests nominal/idempotence/plan-inconnu/NINEA-dupliqué
+  existants restent verts sans modification de leur logique. `docs/adr/
+  0003-atomicite-provisioning.md` mis à jour pour préciser la portée réelle
+  de l'invariant.
 
 ### BIL-11
 

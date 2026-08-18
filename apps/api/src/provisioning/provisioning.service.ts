@@ -1,4 +1,10 @@
-import { ConflictException, Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
+import {
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { DEFAULT_ROLE_NAMES, DEFAULT_ROLE_PERMISSIONS } from "@erp/permissions";
 import { RegisterInput } from "@erp/validation";
@@ -19,6 +25,8 @@ const TRIAL_DAY_MS = 24 * 3_600_000;
 // (docs/adr/0008-...).
 @Injectable()
 export class ProvisioningService {
+  private readonly logger = new Logger(ProvisioningService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly passwordService: PasswordService,
@@ -104,6 +112,23 @@ export class ProvisioningService {
           },
         });
 
+        // BIL-10 (docs/audit/BILLING-AUDIT.md) : dans la transaction, jamais
+        // possible que l'entreprise existe sans son entrée d'audit — corrige
+        // le trou identifié dans l'ADR 0003 (l'invariant "aucune entreprise à
+        // moitié créée" n'était vérifié qu'au sens base de données).
+        await this.auditLog.record(
+          {
+            userId: user.id,
+            enterpriseId: enterprise.id,
+            action: "ENTERPRISE_PROVISIONED",
+            resource: "Enterprise",
+            resourceId: enterprise.id,
+            ipAddress: meta.ipAddress,
+            userAgent: meta.userAgent,
+          },
+          tx,
+        );
+
         return { userId: user.id, enterpriseId: enterprise.id, email: user.email };
       });
     } catch (error) {
@@ -113,25 +138,31 @@ export class ProvisioningService {
       throw error;
     }
 
-    const verificationToken = await this.accountRecovery.issueEmailVerificationToken(created.userId);
-    await this.notifications.notify({
-      userId: created.userId,
-      enterpriseId: created.enterpriseId,
-      type: "WELCOME",
-      to: created.email,
-      subject: "Bienvenue sur la plateforme",
-      body: `Votre entreprise a été créée. Jeton de vérification d'email (valable 24h) : ${verificationToken}`,
-    });
-
-    await this.auditLog.record({
-      userId: created.userId,
-      enterpriseId: created.enterpriseId,
-      action: "ENTERPRISE_PROVISIONED",
-      resource: "Enterprise",
-      resourceId: created.enterpriseId,
-      ipAddress: meta.ipAddress,
-      userAgent: meta.userAgent,
-    });
+    // BIL-10 : effets secondaires en best-effort, hors transaction — jamais
+    // laisser une panne d'émission du jeton de vérification ou d'envoi de
+    // l'email de bienvenue transformer une inscription réussie en 500 alors
+    // que l'entreprise, l'utilisateur et l'abonnement existent déjà. Sans
+    // impact fonctionnel aujourd'hui : User.emailVerifiedAt n'est lu/imposé
+    // nulle part dans le code (vérifié) — seule une notification "Bienvenue"
+    // manquerait, pas une capacité de connexion.
+    try {
+      const verificationToken = await this.accountRecovery.issueEmailVerificationToken(created.userId);
+      await this.notifications.notify({
+        userId: created.userId,
+        enterpriseId: created.enterpriseId,
+        type: "WELCOME",
+        to: created.email,
+        subject: "Bienvenue sur la plateforme",
+        body: `Votre entreprise a été créée. Jeton de vérification d'email (valable 24h) : ${verificationToken}`,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Provisioning : échec de l'émission du jeton de vérification ou de l'envoi de l'email de ` +
+          `bienvenue pour l'entreprise ${created.enterpriseId} (utilisateur ${created.userId}) — ` +
+          "compte créé et utilisable, action de suivi nécessaire.",
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
 
     return this.authService.issueTokenPair(created.userId, created.enterpriseId, false);
   }

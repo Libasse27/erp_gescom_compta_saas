@@ -6,6 +6,9 @@ import { AppModule } from "../app.module";
 import { RawDbClient } from "../prisma/raw-db-client";
 import { DEFAULT_ROLE_NAMES, DEFAULT_ROLE_PERMISSIONS, PERMISSION_KEYS } from "@erp/permissions";
 import { SYSCOHADA_ACCOUNT_CLASSES } from "./syscohada-chart-of-accounts";
+import { AccountRecoveryService } from "../auth/account-recovery.service";
+import { NotificationsService } from "../notifications/notifications.service";
+import { AuthService } from "../auth/auth.service";
 
 // Phase 6 (docs/PROMPT-MAITRE-SAAS.md) : provisioning automatique — une
 // seule transaction (docs/adr/0003-...), idempotence par l'unicité de
@@ -13,6 +16,9 @@ import { SYSCOHADA_ACCOUNT_CLASSES } from "./syscohada-chart-of-accounts";
 describe("ProvisioningController — POST /auth/register (integration)", () => {
   let app: INestApplication;
   let prisma: RawDbClient;
+  let accountRecovery: AccountRecoveryService;
+  let notifications: NotificationsService;
+  let authService: AuthService;
 
   const createdEnterpriseIds: string[] = [];
   const createdPlanIds: string[] = [];
@@ -23,6 +29,9 @@ describe("ProvisioningController — POST /auth/register (integration)", () => {
     app = moduleRef.createNestApplication();
     await app.init();
     prisma = new RawDbClient();
+    accountRecovery = app.get(AccountRecoveryService);
+    notifications = app.get(NotificationsService);
+    authService = app.get(AuthService);
 
     // Catalogue complet requis (DEFAULT_ROLE_PERMISSIONS couvre toutes les
     // clés) : le seed global (prisma db seed) ne tourne pas automatiquement
@@ -153,6 +162,13 @@ describe("ProvisioningController — POST /auth/register (integration)", () => {
     const firstUser = await prisma.user.findUniqueOrThrow({ where: { email: payload.email } });
     createdEnterpriseIds.push(firstUser.enterpriseId!);
 
+    // BIL-10 (docs/audit/BILLING-AUDIT.md) : ENTERPRISE_PROVISIONED est
+    // désormais écrit dans la même transaction que l'entreprise elle-même —
+    // le compte avant la deuxième tentative sert de référence pour prouver
+    // qu'un rollback de transaction l'entraîne bien avec lui, pas seulement
+    // les lignes métier.
+    const auditCountBeforeReplay = await prisma.auditLog.count({ where: { action: "ENTERPRISE_PROVISIONED" } });
+
     const secondAttemptEnterpriseName = `Duplicate Attempt ${randomUUID()}`;
     await request(app.getHttpServer())
       .post("/auth/register")
@@ -164,6 +180,9 @@ describe("ProvisioningController — POST /auth/register (integration)", () => {
 
     const usersWithEmail = await prisma.user.count({ where: { email: payload.email } });
     expect(usersWithEmail).toBe(1);
+
+    const auditCountAfterReplay = await prisma.auditLog.count({ where: { action: "ENTERPRISE_PROVISIONED" } });
+    expect(auditCountAfterReplay).toBe(auditCountBeforeReplay);
   });
 
   it("rejects an unknown planId and leaves no orphaned enterprise", async () => {
@@ -193,5 +212,98 @@ describe("ProvisioningController — POST /auth/register (integration)", () => {
     expect(orphanUser).toBeNull();
     const orphanEnterprise = await prisma.enterprise.findFirst({ where: { name: second.enterpriseName } });
     expect(orphanEnterprise).toBeNull();
+  });
+
+  // BIL-10 (docs/audit/BILLING-AUDIT.md) : les effets secondaires
+  // post-commit ne doivent jamais transformer une inscription réussie en
+  // 500 — l'entreprise, l'utilisateur et l'abonnement existent déjà.
+  it("still succeeds with 201 and valid tokens when issuing the email verification token fails (BIL-10)", async () => {
+    const plan = await createPlan();
+    const payload = registerPayload({ planId: plan.id });
+
+    jest.spyOn(accountRecovery, "issueEmailVerificationToken").mockImplementationOnce(async () => {
+      throw new Error("simulated failure — verification token issuance");
+    });
+
+    const res = await request(app.getHttpServer()).post("/auth/register").send(payload).expect(201);
+    expect(typeof res.body.accessToken).toBe("string");
+    expect(typeof res.body.refreshToken).toBe("string");
+
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: payload.email } });
+    createdEnterpriseIds.push(user.enterpriseId!);
+
+    const auditLogs = await prisma.auditLog.findMany({
+      where: { enterpriseId: user.enterpriseId!, action: "ENTERPRISE_PROVISIONED" },
+    });
+    expect(auditLogs).toHaveLength(1);
+
+    const verificationTokens = await prisma.authToken.findMany({
+      where: { userId: user.id, type: "EMAIL_VERIFICATION" },
+    });
+    expect(verificationTokens).toHaveLength(0);
+
+    const welcomeNotifications = await prisma.notification.findMany({ where: { userId: user.id, type: "WELCOME" } });
+    expect(welcomeNotifications).toHaveLength(0);
+  });
+
+  it("still succeeds with 201 and valid tokens when sending the welcome notification fails (BIL-10)", async () => {
+    const plan = await createPlan();
+    const payload = registerPayload({ planId: plan.id });
+
+    jest.spyOn(notifications, "notify").mockImplementationOnce(async () => {
+      throw new Error("simulated failure — notification delivery");
+    });
+
+    const res = await request(app.getHttpServer()).post("/auth/register").send(payload).expect(201);
+    expect(typeof res.body.accessToken).toBe("string");
+    expect(typeof res.body.refreshToken).toBe("string");
+
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: payload.email } });
+    createdEnterpriseIds.push(user.enterpriseId!);
+
+    const auditLogs = await prisma.auditLog.findMany({
+      where: { enterpriseId: user.enterpriseId!, action: "ENTERPRISE_PROVISIONED" },
+    });
+    expect(auditLogs).toHaveLength(1);
+
+    // Le jeton a bien été émis, avant que l'envoi de la notification qui
+    // devait le porter n'échoue.
+    const verificationTokens = await prisma.authToken.findMany({
+      where: { userId: user.id, type: "EMAIL_VERIFICATION" },
+    });
+    expect(verificationTokens).toHaveLength(1);
+
+    const welcomeNotifications = await prisma.notification.findMany({ where: { userId: user.id, type: "WELCOME" } });
+    expect(welcomeNotifications).toHaveLength(0);
+  });
+
+  // BIL-10 : issueTokenPair reste volontairement bloquant (fait partie du
+  // contrat de réponse) — vérifie que le filet de secours documenté dans
+  // l'ADR 0003 fonctionne réellement : le compte créé reste utilisable via
+  // /auth/login, indépendamment de cet échec résiduel.
+  it("leaves the account fully usable via /auth/login even when the final token-pair issuance fails (residual behavior)", async () => {
+    const plan = await createPlan();
+    const payload = registerPayload({ planId: plan.id });
+
+    jest.spyOn(authService, "issueTokenPair").mockImplementationOnce(async () => {
+      throw new Error("simulated failure — token pair issuance");
+    });
+
+    await request(app.getHttpServer()).post("/auth/register").send(payload).expect(500);
+
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: payload.email } });
+    createdEnterpriseIds.push(user.enterpriseId!);
+    expect(user.status).toBe("ACTIVE");
+
+    const auditLogs = await prisma.auditLog.findMany({
+      where: { enterpriseId: user.enterpriseId!, action: "ENTERPRISE_PROVISIONED" },
+    });
+    expect(auditLogs).toHaveLength(1);
+
+    const loginRes = await request(app.getHttpServer())
+      .post("/auth/login")
+      .send({ email: payload.email, password: payload.password })
+      .expect(200);
+    expect(typeof loginRes.body.accessToken).toBe("string");
   });
 });

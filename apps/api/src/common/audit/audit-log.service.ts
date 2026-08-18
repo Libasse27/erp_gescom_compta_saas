@@ -18,8 +18,14 @@ export interface RecordAuditLogParams {
 export class AuditLogService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async record(params: RecordAuditLogParams): Promise<void> {
-    await this.prisma.auditLog.create({
+  // tx optionnel (BIL-10, docs/audit/BILLING-AUDIT.md) : permet à un
+  // appelant déjà dans une transaction Prisma (ex. provisioning.service.ts)
+  // d'y inclure cette écriture d'audit pour qu'elle soit atomique avec le
+  // reste — jamais possible de créer l'entité sans son entrée d'audit.
+  // Défaut this.prisma (connexion identité) : tous les appels existants,
+  // qui n'en passent pas, sont inchangés.
+  async record(params: RecordAuditLogParams, tx?: Prisma.TransactionClient): Promise<void> {
+    await (tx ?? this.prisma).auditLog.create({
       data: {
         userId: params.userId,
         enterpriseId: params.enterpriseId,

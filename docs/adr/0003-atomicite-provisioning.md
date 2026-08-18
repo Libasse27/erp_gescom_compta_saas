@@ -32,3 +32,38 @@ compensation applicative nécessaire.
   provisioning (webhook asynchrone, Phase 5), cet appel reste hors transaction
   DB — traité séparément via file d'attente, sans remettre en cause cette
   décision pour la partie strictement base de données.
+
+## Mise à jour — 2026-08-18 (BIL-10, docs/audit/BILLING-AUDIT.md)
+L'invariant « aucune entreprise à moitié créée » tel que formulé ci-dessus ne
+portait, dans son implémentation d'origine, que sur les tables couvertes par
+`prisma.$transaction` (Enterprise, Subscription, User, rôles, plan comptable,
+settings) — toutes bien atomiques, testé. Mais **quatre opérations
+s'enchaînaient après le commit, hors transaction et sans protection** :
+émission du jeton de vérification, envoi de l'email de bienvenue, écriture de
+l'audit `ENTERPRISE_PROVISIONED`, émission de la paire de tokens. Une panne
+sur l'une d'elles laissait une entreprise **entièrement créée en base** mais
+un client recevant un 500, sans tokens, incapable de se réinscrire (409 sur
+l'email déjà pris). L'invariant était donc tenu au sens strictement base de
+données, pas au sens du parcours d'inscription complet.
+
+Corrigé en deux temps :
+1. **L'écriture d'audit `ENTERPRISE_PROVISIONED` a rejoint la transaction**
+   (`AuditLogService.record()` accepte désormais un `tx: Prisma.TransactionClient`
+   optionnel) — elle ne peut structurellement plus manquer si l'entreprise
+   existe.
+2. **L'émission du jeton de vérification et l'envoi de l'email de bienvenue
+   restent hors transaction mais sont désormais en best-effort** : une panne y
+   est journalisée (log structuré) mais ne fait plus échouer l'inscription.
+   Assumé sans risque fonctionnel aujourd'hui : `User.emailVerifiedAt` n'est
+   lu ni imposé nulle part dans le code — sa perte reste cosmétique tant
+   qu'aucune fonctionnalité ne vérifie ce champ. **À revoir** si un jour la
+   vérification d'email devient bloquante (ex. accès restreint tant que
+   l'email n'est pas confirmé) : il faudra alors un vrai mécanisme de reprise
+   (renvoi de jeton, file d'attente), pas seulement un log.
+
+L'émission de la paire de tokens (`AuthService.issueTokenPair`) reste, elle,
+bloquante : elle fait partie intégrante du contrat de réponse de l'endpoint
+(`{ accessToken, refreshToken }`). Une panne à cette étape reste possible en
+théorie (résiduel assumé) — mais le compte créé demeure utilisable via le
+flux `/auth/login` standard, indépendant et déjà testé, qui sert de filet de
+secours implicite sans nécessiter de mécanisme dédié.
