@@ -379,7 +379,20 @@ et écrit sur stdout (BIL-11).
   toute divergence. Test : « un amount forgé dans le body est ignoré au profit du prix
   du plan ».
 - **Priorité** : P1
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-18) — `createPendingPaymentSchema` n'accepte
+  plus `amount`/`currency` : seule `billingPeriod` ("MONTHLY" | "YEARLY") est
+  reçue du client. `PaymentsBootstrapService.createPendingPayment` dérive
+  désormais `amount` de `plan.priceMonthly`/`priceYearly` de l'abonnement en
+  cours (`CrossTenantRepository.findEnterpriseWithCurrentSubscription` inclut
+  maintenant le `plan`), et force `currency = Enterprise.currency`. Une
+  périodicité `YEARLY` sur un plan sans `priceYearly` est rejetée en 409.
+  Vérifié par 4 tests dédiés
+  (`payments-bootstrap.integration.spec.ts`) : un `amount`/`currency` forgé
+  dans le corps est ignoré au profit du prix du plan, `YEARLY` dérive bien
+  `priceYearly`, `YEARLY` sans `priceYearly` renvoie 409, une requête sans
+  `billingPeriod` est rejetée en 400. Les tests existants du parcours
+  bootstrap→webhook (`payments-webhook.integration.spec.ts`) mis à jour pour
+  le nouveau contrat de requête et toujours verts.
 
 ### BIL-06
 

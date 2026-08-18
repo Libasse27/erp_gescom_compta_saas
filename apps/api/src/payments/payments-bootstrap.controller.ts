@@ -18,7 +18,11 @@ export class PaymentsBootstrapController {
   create(
     @Param("enterpriseId", new ParseUUIDPipe()) enterpriseId: string,
     @Body(new ZodValidationPipe(createPendingPaymentSchema))
-    body: { provider: "WAVE" | "ORANGE_MONEY" | "FREE_MONEY" | "STRIPE" | "CARD"; providerReference: string; amount: number; currency: string },
+    body: {
+      provider: "WAVE" | "ORANGE_MONEY" | "FREE_MONEY" | "STRIPE" | "CARD";
+      providerReference: string;
+      billingPeriod: "MONTHLY" | "YEARLY";
+    },
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
   ) {

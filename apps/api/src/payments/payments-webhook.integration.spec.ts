@@ -157,7 +157,7 @@ describe("PaymentsWebhookController (integration)", () => {
     const bootstrapRes = await request(app.getHttpServer())
       .post(`/admin/enterprises/${enterprise.id}/payments`)
       .set("Authorization", `Bearer ${superAdminToken}`)
-      .send({ provider: "WAVE", providerReference: `ref-${randomUUID()}`, amount: 5_000, currency: "XOF" })
+      .send({ provider: "WAVE", providerReference: `ref-${randomUUID()}`, billingPeriod: "MONTHLY" })
       .expect(201);
 
     const payment = await prisma.payment.findUniqueOrThrow({ where: { id: bootstrapRes.body.paymentId } });
@@ -319,7 +319,7 @@ describe("PaymentsWebhookController (integration)", () => {
     await request(app.getHttpServer())
       .post(`/admin/enterprises/${enterprise.id}/payments`)
       .set("Authorization", `Bearer ${loginRes.body.accessToken}`)
-      .send({ provider: "WAVE", providerReference: `ref-${randomUUID()}`, amount: 5_000, currency: "XOF" })
+      .send({ provider: "WAVE", providerReference: `ref-${randomUUID()}`, billingPeriod: "MONTHLY" })
       .expect(403);
   });
 
@@ -331,7 +331,7 @@ describe("PaymentsWebhookController (integration)", () => {
     await request(app.getHttpServer())
       .post(`/admin/enterprises/${enterprise.id}/payments`)
       .set("Authorization", `Bearer ${superAdminToken}`)
-      .send({ provider: "WAVE", providerReference: `ref-${randomUUID()}`, amount: 5_000, currency: "XOF" })
+      .send({ provider: "WAVE", providerReference: `ref-${randomUUID()}`, billingPeriod: "MONTHLY" })
       .expect(404);
   });
 });

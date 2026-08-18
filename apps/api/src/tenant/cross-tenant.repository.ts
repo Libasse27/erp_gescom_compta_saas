@@ -19,10 +19,10 @@ export class CrossTenantRepository {
 
   findEnterpriseWithCurrentSubscription(
     enterpriseId: string,
-  ): Promise<(Enterprise & { currentSubscription: Subscription | null }) | null> {
+  ): Promise<(Enterprise & { currentSubscription: (Subscription & { plan: Plan }) | null }) | null> {
     return this.prisma.enterprise.findUnique({
       where: { id: enterpriseId },
-      include: { currentSubscription: true },
+      include: { currentSubscription: { include: { plan: true } } },
     });
   }
 

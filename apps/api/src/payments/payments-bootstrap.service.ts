@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { CreatePendingPaymentInput } from "@erp/validation";
 import { AuditLogService } from "../common/audit/audit-log.service";
 import { RequestMetadata } from "../auth/auth.service";
@@ -25,13 +25,22 @@ export class PaymentsBootstrapService {
       throw new NotFoundException("Aucun abonnement actif pour cette entreprise");
     }
 
+    // BIL-05 : le montant n'est jamais accepté depuis la requête, il est
+    // dérivé du prix du plan de l'abonnement en cours (CLAUDE.md §6).
+    const plan = enterprise.currentSubscription.plan;
+    const amount = input.billingPeriod === "MONTHLY" ? plan.priceMonthly : plan.priceYearly;
+    if (amount === null || amount === undefined) {
+      throw new ConflictException("Ce plan ne propose pas de facturation annuelle");
+    }
+    const currency = enterprise.currency;
+
     const payment = await this.crossTenant.createPendingPayment({
       enterpriseId,
       subscriptionId: enterprise.currentSubscription.id,
       provider: input.provider,
       providerReference: input.providerReference,
-      amount: input.amount,
-      currency: input.currency,
+      amount,
+      currency,
     });
 
     await this.auditLog.record({
@@ -42,7 +51,14 @@ export class PaymentsBootstrapService {
       resourceId: payment.id,
       ipAddress: meta.ipAddress,
       userAgent: meta.userAgent,
-      metadata: { status: "PENDING", provider: input.provider, providerReference: input.providerReference },
+      metadata: {
+        status: "PENDING",
+        provider: input.provider,
+        providerReference: input.providerReference,
+        billingPeriod: input.billingPeriod,
+        amount,
+        currency,
+      },
     });
 
     return { paymentId: payment.id };
