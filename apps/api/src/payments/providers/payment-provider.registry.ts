@@ -14,7 +14,10 @@ export class PaymentProviderRegistry {
   get(provider: PaymentProvider): PaymentProviderAdapter {
     let adapter = this.adapters.get(provider);
     if (!adapter) {
-      adapter = new HmacPaymentProviderAdapter(env.paymentWebhookSecret(provider));
+      adapter = new HmacPaymentProviderAdapter(
+        env.paymentWebhookSecret(provider),
+        env.paymentWebhookReplayToleranceSeconds(),
+      );
       this.adapters.set(provider, adapter);
     }
     return adapter;

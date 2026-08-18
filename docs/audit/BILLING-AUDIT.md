@@ -418,7 +418,28 @@ et écrit sur stdout (BIL-11).
   conserver l'identifiant d'événement pour une table anti-rejeu (voir BIL-09).
   Documenter cette exigence dans l'ADR 0010 comme prérequis d'intégration réelle.
 - **Priorité** : P2
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-18) — `HmacPaymentProviderAdapter.verifySignature`
+  exige désormais un en-tête `x-webhook-timestamp` (epoch secondes), inclus
+  dans la chaîne signée (`${timestamp}.${rawBody}`, plus jamais le corps
+  seul) et comparé à l'heure serveur avec une tolérance configurable
+  (`PAYMENT_WEBHOOK_REPLAY_TOLERANCE_SECONDS`, 300 s par défaut). Un
+  timestamp absent, non numérique, ou hors tolérance (passé ou futur) est
+  rejeté au même titre qu'une signature invalide (401), sans distinguer la
+  raison précise dans la réponse. `PaymentProviderAdapter.verifySignature`
+  (contrat, `docs/adr/0010-...` mis à jour) prend un troisième paramètre —
+  changement sans impact aujourd'hui, un seul adaptateur existant, aucun
+  fournisseur réel branché. Vérifié par 8 nouveaux tests unitaires
+  (`hmac-payment-provider.adapter.spec.ts` : absence de timestamp,
+  timestamp non numérique, trop ancien, trop dans le futur, à la limite de
+  la tolérance, ancien format de signature sans timestamp rejeté) et 2
+  tests d'intégration bout-en-bout
+  (`payments-webhook.integration.spec.ts` : webhook sans timestamp et
+  webhook avec un timestamp d'il y a 1h, tous deux rejetés en 401 sans
+  changement d'état). **Reste ouvert, non traité ici** : ceci borne la
+  fenêtre de rejeu à quelques minutes mais ne l'élimine pas — un rejeu
+  **dans** la fenêtre de tolérance reste accepté comme un événement légitime
+  ; l'élimination complète nécessite la table d'événements déjà vus de
+  BIL-09.
 
 ### BIL-07
 

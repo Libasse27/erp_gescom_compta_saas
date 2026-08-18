@@ -33,6 +33,11 @@ export const env = {
   // chaque vendeur (identifiants marchands non disponibles à ce stade).
   paymentWebhookSecret: (provider: PaymentProvider) => requireEnv(`PAYMENT_WEBHOOK_SECRET_${provider}`),
   paymentGracePeriodDays: () => Number(process.env.PAYMENT_GRACE_PERIOD_DAYS ?? 7),
+  // Corrige BIL-06 (docs/audit/BILLING-AUDIT.md) : fenêtre de fraîcheur du
+  // timestamp signé (x-webhook-timestamp), même esprit que le schéma Stripe
+  // cité par docs/adr/0010-... — borne combien de temps un corps signé
+  // reste rejouable tel quel.
+  paymentWebhookReplayToleranceSeconds: () => Number(process.env.PAYMENT_WEBHOOK_REPLAY_TOLERANCE_SECONDS ?? 300),
   // Liste blanche stricte (CLAUDE.md §6) — jamais "*". apps/web appelle
   // l'API directement depuis le navigateur pour les requêtes authentifiées
   // (Phase 7) ; séparées par virgule pour couvrir plusieurs environnements

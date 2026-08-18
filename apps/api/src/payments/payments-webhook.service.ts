@@ -31,11 +31,16 @@ export class PaymentWebhookService {
     private readonly auditLog: AuditLogService,
   ) {}
 
-  async handle(providerParam: string, rawBody: Buffer, signatureHeader: string | undefined): Promise<WebhookResult> {
+  async handle(
+    providerParam: string,
+    rawBody: Buffer,
+    signatureHeader: string | undefined,
+    timestampHeader: string | undefined,
+  ): Promise<WebhookResult> {
     const provider = this.registry.resolveProvider(providerParam);
     const adapter = this.registry.get(provider);
 
-    if (!adapter.verifySignature(rawBody, signatureHeader)) {
+    if (!adapter.verifySignature(rawBody, signatureHeader, timestampHeader)) {
       throw new UnauthorizedException("Signature de webhook invalide");
     }
 

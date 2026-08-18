@@ -35,6 +35,32 @@ change pas quand un fournisseur réel sera branché : seul
 uniquement, par un adaptateur dédié à son schéma réel
 (`StripeSignatureAdapter`, etc.) implémentant la même interface.
 
+## Mise à jour — 2026-08-18 (BIL-06, docs/audit/BILLING-AUDIT.md)
+La signature seule (sur le corps brut) ne bornait pas dans le temps la
+validité d'un corps signé capté — un rejeu tardif restait accepté comme
+signature valide. `HmacPaymentProviderAdapter.verifySignature` exige
+désormais un en-tête `x-webhook-timestamp` (epoch secondes), inclus dans la
+chaîne signée (`${timestamp}.${rawBody}`, jamais le corps seul) et comparé à
+l'heure serveur avec une tolérance configurable
+(`PAYMENT_WEBHOOK_REPLAY_TOLERANCE_SECONDS`, 300 s par défaut — même ordre de
+grandeur que la tolérance Stripe citée plus haut). Un timestamp absent, non
+numérique, ou hors tolérance (passé ou futur) est rejeté au même titre qu'une
+signature invalide.
+
+**Prérequis pour tout futur adaptateur dédié à un fournisseur réel**
+(`StripeSignatureAdapter`, etc.) : `PaymentProviderAdapter.verifySignature`
+prend maintenant trois paramètres (corps, signature, timestamp). Chaque
+adaptateur réel doit apporter sa propre fraîcheur bornée dans le temps, que
+le schéma du fournisseur la porte dans un en-tête séparé ou combinée à la
+signature (ex. `Stripe-Signature: t=...,v1=...`) — ne jamais réintroduire un
+adaptateur dont la signature seule, sans notion de fraîcheur, suffit à
+valider indéfiniment un corps capté.
+
+Reste hors périmètre de cette mise à jour (BIL-09, non traité ici) : la
+fraîcheur limite la fenêtre de rejeu à quelques minutes, mais ne l'élimine
+pas — un rejeu **dans** la fenêtre de tolérance reste accepté comme un
+événement légitime, faute d'un magasin d'identifiants d'événements déjà vus.
+
 ## Conséquences
 - Aucun webhook de paiement réel (Wave, Orange Money, Stripe...) ne peut
   être accepté aujourd'hui : ce mécanisme n'est vérifié qu'avec des secrets

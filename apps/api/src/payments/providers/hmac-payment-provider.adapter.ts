@@ -3,19 +3,36 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { paymentWebhookEventSchema } from "@erp/validation";
 import { PaymentProviderAdapter, PaymentWebhookEvent } from "./payment-provider.types";
 
-// HMAC-SHA256 générique sur le corps brut, en attendant le schéma de
-// signature réel de chaque fournisseur (docs/adr/0010-...). Comparaison en
+// HMAC-SHA256 générique sur `${timestamp}.${rawBody}`, en attendant le schéma
+// de signature réel de chaque fournisseur (docs/adr/0010-...). Comparaison en
 // temps constant : ne jamais comparer des signatures avec `===` (fuite de
 // timing exploitable pour deviner la signature attendue octet par octet).
+//
+// Le timestamp (BIL-06, docs/audit/BILLING-AUDIT.md) borne la durée de vie
+// d'un corps signé : sans lui, un corps capté une fois (log, proxy compromis)
+// reste rejouable indéfiniment. Il est inclus dans la chaîne signée (pas
+// seulement comparé à côté) pour qu'un attaquant ne puisse pas coller un
+// timestamp frais à une ancienne paire (corps, signature) sans en recalculer
+// la signature — ce qu'il ne peut pas faire sans le secret.
 export class HmacPaymentProviderAdapter implements PaymentProviderAdapter {
-  constructor(private readonly secret: string) {}
+  constructor(
+    private readonly secret: string,
+    private readonly replayToleranceSeconds: number,
+  ) {}
 
-  verifySignature(rawBody: Buffer, signatureHeader: string | undefined): boolean {
-    if (!signatureHeader) {
+  verifySignature(rawBody: Buffer, signatureHeader: string | undefined, timestampHeader: string | undefined): boolean {
+    if (!signatureHeader || !timestampHeader || !/^\d+$/.test(timestampHeader)) {
       return false;
     }
 
-    const expected = createHmac("sha256", this.secret).update(rawBody).digest("hex");
+    const timestampSeconds = Number(timestampHeader);
+    const ageSeconds = Math.abs(Date.now() / 1000 - timestampSeconds);
+    if (ageSeconds > this.replayToleranceSeconds) {
+      return false;
+    }
+
+    const signedPayload = Buffer.concat([Buffer.from(`${timestampHeader}.`, "utf8"), rawBody]);
+    const expected = createHmac("sha256", this.secret).update(signedPayload).digest("hex");
     const expectedBuffer = Buffer.from(expected, "utf8");
     const providedBuffer = Buffer.from(signatureHeader, "utf8");
 

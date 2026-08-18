@@ -54,11 +54,20 @@ describe("PaymentsWebhookController (integration)", () => {
     await app.close();
   });
 
-  function sign(secret: string, body: Buffer): string {
-    return createHmac("sha256", secret).update(body).digest("hex");
+  function sign(secret: string, timestamp: string, body: Buffer): string {
+    return createHmac("sha256", secret).update(Buffer.concat([Buffer.from(`${timestamp}.`, "utf8"), body])).digest("hex");
   }
 
-  function postWebhook(provider: string, payload: object, secret: string, signatureOverride?: string) {
+  function nowSeconds(offsetSeconds = 0): string {
+    return String(Math.floor(Date.now() / 1000) + offsetSeconds);
+  }
+
+  function postWebhook(
+    provider: string,
+    payload: object,
+    secret: string,
+    options: { signatureOverride?: string; timestampOverride?: string | null } = {},
+  ) {
     // superagent JSON.stringify tout ce qui n'est pas une string dès que le
     // Content-Type est application/json (y compris un Buffer — vérifié
     // empiriquement) : on envoie donc la chaîne JSON déjà sérialisée, jamais
@@ -66,12 +75,17 @@ describe("PaymentsWebhookController (integration)", () => {
     // soient exactement ceux sur lesquels la signature est calculée.
     const rawBodyString = JSON.stringify(payload);
     const rawBody = Buffer.from(rawBodyString, "utf8");
-    const signature = signatureOverride ?? sign(secret, rawBody);
+    // timestampOverride === null : n'envoie aucun en-tête timestamp (BIL-06).
+    const timestamp = options.timestampOverride === undefined ? nowSeconds() : options.timestampOverride;
+    const signature = options.signatureOverride ?? sign(secret, timestamp ?? nowSeconds(), rawBody);
     const req = request(app.getHttpServer())
       .post(`/webhooks/payments/${provider}`)
       .set("Content-Type", "application/json");
     if (signature !== "__no_signature__") {
       req.set("x-webhook-signature", signature);
+    }
+    if (timestamp !== null) {
+      req.set("x-webhook-timestamp", timestamp);
     }
     return req.send(rawBodyString);
   }
@@ -246,7 +260,7 @@ describe("PaymentsWebhookController (integration)", () => {
     const { paymentId, providerReference } = await createPendingPayment(enterprise.id, subscription.id);
     const payload = { reference: providerReference, status: "succeeded", amount: 5_000, currency: "XOF" };
 
-    await postWebhook("WAVE", payload, wave.secret, "__no_signature__").expect(401);
+    await postWebhook("WAVE", payload, wave.secret, { signatureOverride: "__no_signature__" }).expect(401);
 
     const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
     expect(payment.status).toBe("PENDING");
@@ -258,6 +272,31 @@ describe("PaymentsWebhookController (integration)", () => {
     const payload = { reference: providerReference, status: "succeeded", amount: 5_000, currency: "XOF" };
 
     await postWebhook("WAVE", payload, "totally-wrong-secret").expect(401);
+
+    const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
+    expect(payment.status).toBe("PENDING");
+  });
+
+  // BIL-06 (docs/audit/BILLING-AUDIT.md) : un corps signé capté une fois ne
+  // doit pas rester rejouable indéfiniment.
+  it("rejects a webhook with no timestamp header, without changing any state", async () => {
+    const { enterprise, subscription } = await createEnterpriseWithActiveUser("TRIAL");
+    const { paymentId, providerReference } = await createPendingPayment(enterprise.id, subscription.id);
+    const payload = { reference: providerReference, status: "succeeded", amount: 5_000, currency: "XOF" };
+
+    await postWebhook("WAVE", payload, wave.secret, { timestampOverride: null }).expect(401);
+
+    const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
+    expect(payment.status).toBe("PENDING");
+  });
+
+  it("rejects a webhook whose timestamp is older than the replay tolerance, without changing any state", async () => {
+    const { enterprise, subscription } = await createEnterpriseWithActiveUser("TRIAL");
+    const { paymentId, providerReference } = await createPendingPayment(enterprise.id, subscription.id);
+    const payload = { reference: providerReference, status: "succeeded", amount: 5_000, currency: "XOF" };
+    const staleTimestamp = String(Math.floor(Date.now() / 1000) - 3_600);
+
+    await postWebhook("WAVE", payload, wave.secret, { timestampOverride: staleTimestamp }).expect(401);
 
     const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
     expect(payment.status).toBe("PENDING");

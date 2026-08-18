@@ -17,6 +17,11 @@ export class PaymentsWebhookController {
       throw new BadRequestException("Corps de requête brut indisponible");
     }
 
-    return this.webhookService.handle(provider, req.rawBody, req.header("x-webhook-signature"));
+    return this.webhookService.handle(
+      provider,
+      req.rawBody,
+      req.header("x-webhook-signature"),
+      req.header("x-webhook-timestamp"),
+    );
   }
 }
