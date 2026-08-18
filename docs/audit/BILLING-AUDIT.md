@@ -514,7 +514,28 @@ et écrit sur stdout (BIL-11).
   cas, **le paiement doit être marqué `FAILED` et la notification envoyée** ; répondre
   200 au fournisseur. Ajouter le test « échec de paiement sur abonnement TRIAL ».
 - **Priorité** : P2
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-18) — décision produit tranchée : **option (a)**,
+  un échec de paiement pendant l'essai n'a aucune conséquence sur le statut
+  (l'entreprise n'a jamais été facturée, elle reste `TRIAL` jusqu'à
+  `trialEndDate`). Dans `PaymentWebhookService.handle`, `targetStatus` devient
+  `SubscriptionStatus | null` : `null` quand `event.status === "FAILED"` et
+  `subscription.status === "TRIAL"` — aucune transition tentée, aucun
+  `SubscriptionEvent` créé, `assertSubscriptionTransition` jamais appelée pour
+  ce cas (donc plus de 409, plus de paiement bloqué en `PENDING`). Le
+  compare-and-swap (`tx.payment.updateMany`, BIL-01) committe désormais
+  normalement : `payment.status` passe à `FAILED` comme pour tout autre échec.
+  `notifyEnterprise` distingue le message selon `subscription.status` (essai en
+  cours vs abonnement payant en attente de paiement) — le texte ne prétend plus
+  à tort que l'abonnement est « en attente de paiement » alors qu'il reste
+  `TRIAL`. **Aucune migration** : `ALLOWED_TRANSITIONS.TRIAL` n'a pas été
+  modifiée (l'option (b), qui l'aurait nécessité, n'a pas été retenue) ; aucun
+  changement de schéma. Vérifié par 2 tests dédiés
+  (`payments-webhook.integration.spec.ts`) : échec pendant l'essai → 200,
+  paiement `FAILED`, abonnement `TRIAL` inchangé, aucun `SubscriptionEvent`,
+  notification envoyée, aucune facture ; et l'interaction avec BIL-07 — un
+  `SUCCEEDED` tardif arrivant après cet échec correctement enregistré est bien
+  traité comme un conflit (`status_conflict`), pas un traitement normal. Le
+  test existant sur `ACTIVE` reste vert sans modification.
 
 ### BIL-09
 

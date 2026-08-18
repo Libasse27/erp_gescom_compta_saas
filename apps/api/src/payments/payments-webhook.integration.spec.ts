@@ -346,6 +346,64 @@ describe("PaymentsWebhookController (integration)", () => {
     expect(invoices).toHaveLength(0);
   });
 
+  // BIL-08 (docs/audit/BILLING-AUDIT.md) : un échec pendant l'essai n'a
+  // aucune conséquence sur le statut — TRIAL → PAST_DUE n'est de toute façon
+  // pas une transition autorisée par la machine à états.
+  it("on failure during TRIAL: leaves the subscription untouched, marks the payment FAILED, and still notifies (BIL-08)", async () => {
+    const { enterprise, subscription, user } = await createEnterpriseWithActiveUser("TRIAL");
+    const { paymentId, providerReference } = await createPendingPayment(enterprise.id, subscription.id);
+
+    const res = await postWebhook(
+      "WAVE",
+      { reference: providerReference, status: "failed", amount: 5_000, currency: "XOF" },
+      wave.secret,
+    ).expect(200);
+    expect(res.body.outcome).toBe("processed");
+
+    const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
+    expect(payment.status).toBe("FAILED");
+
+    const updatedSubscription = await prisma.subscription.findUniqueOrThrow({ where: { id: subscription.id } });
+    expect(updatedSubscription.status).toBe("TRIAL");
+    expect(updatedSubscription.renewalDate).toBeNull();
+
+    const events = await prisma.subscriptionEvent.findMany({ where: { subscriptionId: subscription.id } });
+    expect(events).toHaveLength(0);
+
+    const notifications = await prisma.notification.findMany({ where: { userId: user.id, type: "PAYMENT_FAILED" } });
+    expect(notifications).toHaveLength(1);
+
+    const invoices = await prisma.invoice.findMany({ where: { enterpriseId: enterprise.id } });
+    expect(invoices).toHaveLength(0);
+  });
+
+  it("a SUCCEEDED event arriving after a TRIAL failure already recorded is flagged as a conflict, not processed normally (BIL-07/BIL-08 interaction)", async () => {
+    const { enterprise, subscription } = await createEnterpriseWithActiveUser("TRIAL");
+    const { paymentId, providerReference } = await createPendingPayment(enterprise.id, subscription.id);
+
+    await postWebhook(
+      "WAVE",
+      { reference: providerReference, status: "failed", amount: 5_000, currency: "XOF" },
+      wave.secret,
+    ).expect(200);
+
+    const conflictRes = await postWebhook(
+      "WAVE",
+      { reference: providerReference, status: "succeeded", amount: 5_000, currency: "XOF" },
+      wave.secret,
+    ).expect(200);
+    expect(conflictRes.body.outcome).toBe("status_conflict");
+
+    const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
+    expect(payment.status).toBe("FAILED");
+
+    const updatedSubscription = await prisma.subscription.findUniqueOrThrow({ where: { id: subscription.id } });
+    expect(updatedSubscription.status).toBe("TRIAL");
+
+    const invoices = await prisma.invoice.findMany({ where: { enterpriseId: enterprise.id } });
+    expect(invoices).toHaveLength(0);
+  });
+
   // BIL-07 (docs/audit/BILLING-AUDIT.md) : un événement différent d'un
   // paiement déjà résolu n'est jamais un simple rejeu — il doit être
   // détectable, jamais avalé silencieusement.

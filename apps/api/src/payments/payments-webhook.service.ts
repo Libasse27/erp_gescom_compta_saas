@@ -159,11 +159,21 @@ export class PaymentWebhookService {
         const subscription = await tx.subscription.findUniqueOrThrow({ where: { id: payment.subscriptionId! } });
         const enterprise = await tx.enterprise.findUniqueOrThrow({ where: { id: payment.enterpriseId } });
 
-        const targetStatus: SubscriptionStatus =
-          event.status === "SUCCEEDED" ? SubscriptionStatus.ACTIVE : SubscriptionStatus.PAST_DUE;
+        // BIL-08 (docs/audit/BILLING-AUDIT.md) : un échec pendant l'essai
+        // n'a aucune conséquence sur le statut — l'entreprise n'a jamais été
+        // facturée, elle reste TRIAL jusqu'à trialEndDate. TRIAL → PAST_DUE
+        // n'est de toute façon pas une transition autorisée par la machine à
+        // états (subscription-state-machine.ts) ; viser PAST_DUE ici la
+        // ferait échouer et bloquerait le paiement en PENDING indéfiniment.
+        const targetStatus: SubscriptionStatus | null =
+          event.status === "SUCCEEDED"
+            ? SubscriptionStatus.ACTIVE
+            : subscription.status === SubscriptionStatus.TRIAL
+              ? null
+              : SubscriptionStatus.PAST_DUE;
 
         let subscription2 = subscription;
-        if (subscription.status !== targetStatus) {
+        if (targetStatus !== null && subscription.status !== targetStatus) {
           assertSubscriptionTransition(subscription.status, targetStatus);
 
           subscription2 = await tx.subscription.update({
@@ -261,13 +271,21 @@ export class PaymentWebhookService {
         body: "Votre paiement a été confirmé, votre abonnement est actif.",
       });
     } else {
+      // BIL-08 : un échec pendant l'essai ne met pas l'abonnement en attente
+      // de paiement (il reste TRIAL) — le message ne doit pas prétendre le
+      // contraire.
+      const body =
+        subscription.status === "TRIAL"
+          ? `Votre paiement a échoué. Votre période d'essai continue jusqu'au ${subscription.trialEndDate?.toLocaleDateString("fr-SN") ?? "sa date prévue"} — vous pouvez réessayer à tout moment.`
+          : `Votre paiement a échoué. Votre abonnement passe en statut "en attente de paiement" jusqu'au ${subscription.renewalDate?.toLocaleDateString("fr-SN") ?? "prochain renouvellement"}.`;
+
       await this.notifications.notify({
         userId: recipient.id,
         enterpriseId,
         type: "PAYMENT_FAILED",
         to: recipient.email,
         subject: "Échec de paiement",
-        body: `Votre paiement a échoué. Votre abonnement passe en statut "en attente de paiement" jusqu'au ${subscription.renewalDate?.toLocaleDateString("fr-SN") ?? "prochain renouvellement"}.`,
+        body,
       });
     }
   }
