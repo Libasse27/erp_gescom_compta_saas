@@ -1,7 +1,7 @@
 import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
-import { randomUUID, createHmac } from "node:crypto";
+import { randomUUID, createHmac, createHash } from "node:crypto";
 import { authenticator } from "otplib";
 import { AppModule } from "../app.module";
 import { RawDbClient } from "../prisma/raw-db-client";
@@ -60,6 +60,20 @@ describe("PaymentsWebhookController (integration)", () => {
 
   function nowSeconds(offsetSeconds = 0): string {
     return String(Math.floor(Date.now() / 1000) + offsetSeconds);
+  }
+
+  // BIL-09 (docs/audit/BILLING-AUDIT.md) : l'empreinte du corps brut est la
+  // seule donnée stable qui corrèle une requête de test à l'entrée d'audit
+  // qu'elle a produite — pour un rejet de signature, ni enterpriseId ni
+  // providerReference ne sont encore connus du service au moment de l'audit.
+  function expectedBodyHash(payload: object | string): string {
+    const body = typeof payload === "string" ? payload : JSON.stringify(payload);
+    return createHash("sha256").update(body).digest("hex");
+  }
+
+  async function findRejectionAudit(bodyHash: string) {
+    const rejections = await prisma.auditLog.findMany({ where: { action: "PAYMENT_WEBHOOK_REJECTED" } });
+    return rejections.find((log) => (log.metadata as Record<string, unknown> | null)?.bodyHash === bodyHash);
   }
 
   function postWebhook(
@@ -199,6 +213,12 @@ describe("PaymentsWebhookController (integration)", () => {
     expect(events).toHaveLength(1);
     expect(events[0]!.fromStatus).toBe("TRIAL");
     expect(events[0]!.toStatus).toBe("ACTIVE");
+
+    // BIL-09 (docs/audit/BILLING-AUDIT.md) : un succès n'est jamais un rejet.
+    const rejections = await prisma.auditLog.findMany({
+      where: { enterpriseId: enterprise.id, action: "PAYMENT_WEBHOOK_REJECTED" },
+    });
+    expect(rejections).toHaveLength(0);
   });
 
   it("is idempotent: the same webhook replayed 3 times only changes state and generates an invoice once", async () => {
@@ -264,6 +284,10 @@ describe("PaymentsWebhookController (integration)", () => {
 
     const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
     expect(payment.status).toBe("PENDING");
+
+    const rejection = await findRejectionAudit(expectedBodyHash(payload));
+    expect(rejection).toBeDefined();
+    expect(rejection!.metadata).toMatchObject({ httpStatus: 401, reason: "invalid_signature_or_timestamp" });
   });
 
   it("rejects a webhook signed with the wrong secret", async () => {
@@ -275,6 +299,10 @@ describe("PaymentsWebhookController (integration)", () => {
 
     const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
     expect(payment.status).toBe("PENDING");
+
+    const rejection = await findRejectionAudit(expectedBodyHash(payload));
+    expect(rejection).toBeDefined();
+    expect(rejection!.metadata).toMatchObject({ httpStatus: 401, reason: "invalid_signature_or_timestamp" });
   });
 
   // BIL-06 (docs/audit/BILLING-AUDIT.md) : un corps signé capté une fois ne
@@ -288,6 +316,10 @@ describe("PaymentsWebhookController (integration)", () => {
 
     const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
     expect(payment.status).toBe("PENDING");
+
+    const rejection = await findRejectionAudit(expectedBodyHash(payload));
+    expect(rejection).toBeDefined();
+    expect(rejection!.metadata).toMatchObject({ httpStatus: 401, reason: "invalid_signature_or_timestamp" });
   });
 
   it("rejects a webhook whose timestamp is older than the replay tolerance, without changing any state", async () => {
@@ -300,28 +332,94 @@ describe("PaymentsWebhookController (integration)", () => {
 
     const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
     expect(payment.status).toBe("PENDING");
+
+    const rejection = await findRejectionAudit(expectedBodyHash(payload));
+    expect(rejection).toBeDefined();
+    expect(rejection!.metadata).toMatchObject({ httpStatus: 401, reason: "invalid_signature_or_timestamp" });
   });
 
   it("rejects a webhook referencing a payment that was never bootstrapped", async () => {
-    await postWebhook(
-      "WAVE",
-      { reference: `unknown-${randomUUID()}`, status: "succeeded", amount: 5_000, currency: "XOF" },
-      wave.secret,
-    ).expect(404);
+    const payload = { reference: `unknown-${randomUUID()}`, status: "succeeded", amount: 5_000, currency: "XOF" };
+
+    await postWebhook("WAVE", payload, wave.secret).expect(404);
+
+    const rejection = await findRejectionAudit(expectedBodyHash(payload));
+    expect(rejection).toBeDefined();
+    expect(rejection!.metadata).toMatchObject({
+      httpStatus: 404,
+      reason: "unknown_payment_reference",
+      providerReference: payload.reference,
+    });
   });
 
   it("rejects a webhook whose amount does not match the pending payment", async () => {
     const { enterprise, subscription } = await createEnterpriseWithActiveUser("TRIAL");
     const { paymentId, providerReference } = await createPendingPayment(enterprise.id, subscription.id, 5_000);
+    const payload = { reference: providerReference, status: "succeeded", amount: 999_999, currency: "XOF" };
 
-    await postWebhook(
-      "WAVE",
-      { reference: providerReference, status: "succeeded", amount: 999_999, currency: "XOF" },
-      wave.secret,
-    ).expect(400);
+    await postWebhook("WAVE", payload, wave.secret).expect(400);
 
     const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
     expect(payment.status).toBe("PENDING");
+
+    const rejections = await prisma.auditLog.findMany({
+      where: { enterpriseId: enterprise.id, resourceId: paymentId, action: "PAYMENT_WEBHOOK_REJECTED" },
+    });
+    expect(rejections).toHaveLength(1);
+    expect(rejections[0]!.metadata).toMatchObject({ httpStatus: 400, reason: "amount_or_currency_mismatch" });
+  });
+
+  // BIL-09 (docs/audit/BILLING-AUDIT.md) : ce chemin (schéma d'événement
+  // invalide, mais JSON syntaxiquement valide — une syntaxe JSON invalide
+  // est rejetée en amont par le body-parser Express lui-même, avant même
+  // d'atteindre ce contrôleur) n'avait jamais de test dédié.
+  it("rejects a webhook whose body is valid JSON but does not match the expected event schema, and audits the rejection", async () => {
+    const rawBodyString = JSON.stringify({ unexpected: "shape" });
+    const rawBody = Buffer.from(rawBodyString, "utf8");
+    const timestamp = nowSeconds();
+    const signature = sign(wave.secret, timestamp, rawBody);
+
+    await request(app.getHttpServer())
+      .post("/webhooks/payments/WAVE")
+      .set("Content-Type", "application/json")
+      .set("x-webhook-signature", signature)
+      .set("x-webhook-timestamp", timestamp)
+      .send(rawBodyString)
+      .expect(400);
+
+    const rejection = await findRejectionAudit(expectedBodyHash(rawBodyString));
+    expect(rejection).toBeDefined();
+    expect(rejection!.metadata).toMatchObject({ httpStatus: 400, reason: "malformed_body" });
+  });
+
+  // BIL-09 : chemin défensif (createPendingPayment côté plateforme fixe
+  // toujours subscriptionId — ce cas n'avait jamais de test dédié).
+  it("rejects a webhook for a payment without a subscription, and audits the rejection", async () => {
+    const enterprise = await prisma.enterprise.create({ data: { name: `No Subscription Payment ${randomUUID()}` } });
+    createdEnterpriseIds.push(enterprise.id);
+    const providerReference = `ref-${randomUUID()}`;
+    const payment = await prisma.payment.create({
+      data: {
+        enterpriseId: enterprise.id,
+        provider: "WAVE",
+        providerReference,
+        amount: 5_000,
+        currency: "XOF",
+        status: "PENDING",
+      },
+    });
+
+    const payload = { reference: providerReference, status: "succeeded", amount: 5_000, currency: "XOF" };
+    await postWebhook("WAVE", payload, wave.secret).expect(409);
+
+    const updatedPayment = await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } });
+    expect(updatedPayment.status).toBe("PENDING");
+
+    const rejections = await prisma.auditLog.findMany({
+      where: { enterpriseId: enterprise.id, resourceId: payment.id, action: "PAYMENT_WEBHOOK_REJECTED" },
+    });
+    expect(rejections).toHaveLength(1);
+    expect(rejections[0]!.metadata).toMatchObject({ httpStatus: 409, reason: "payment_without_subscription" });
   });
 
   it("on failure: moves an ACTIVE subscription to PAST_DUE, sets a grace-period renewal date, and notifies", async () => {
@@ -445,6 +543,13 @@ describe("PaymentsWebhookController (integration)", () => {
       previousStatus: "FAILED",
       incomingStatus: "SUCCEEDED",
     });
+
+    // BIL-09 : un status_conflict (BIL-07) n'est pas un rejet HTTP — il
+    // répond 200 et n'est jamais journalisé comme PAYMENT_WEBHOOK_REJECTED.
+    const rejections = await prisma.auditLog.findMany({
+      where: { enterpriseId: enterprise.id, action: "PAYMENT_WEBHOOK_REJECTED" },
+    });
+    expect(rejections).toHaveLength(0);
   });
 
   it("flags as a conflict a FAILED event arriving after a SUCCEEDED already recorded, without reverting the subscription", async () => {

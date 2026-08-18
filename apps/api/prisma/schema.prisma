@@ -145,6 +145,12 @@ enum AuditAction {
   // (BIL-04, Enterprise.status, déclenché par un Super Admin).
   EXPIRE_TRIAL
   SUSPEND_SUBSCRIPTION
+  // Corrige BIL-09 (docs/audit/BILLING-AUDIT.md) : chaque rejet de webhook
+  // de paiement (signature/timestamp invalide, corps malformé, référence
+  // inconnue, montant divergent, paiement sans abonnement, transition de
+  // statut invalide) devient détectable — jusqu'ici silencieux au-delà de
+  // la ligne HTTP générique.
+  PAYMENT_WEBHOOK_REJECTED
 }
 
 // ACTIVE : jamais utilisé. ROTATED : échangé contre un nouveau token (rotation

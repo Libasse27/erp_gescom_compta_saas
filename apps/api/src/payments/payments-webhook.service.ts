@@ -6,7 +6,8 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from "@nestjs/common";
-import { Subscription, SubscriptionStatus } from "@prisma/client";
+import { createHash } from "node:crypto";
+import { PaymentProvider, Subscription, SubscriptionStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditLogService } from "../common/audit/audit-log.service";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -17,6 +18,7 @@ import {
 } from "../subscriptions/subscription-state-machine";
 import { InvoiceGenerationService } from "./invoice-generation.service";
 import { PaymentProviderRegistry } from "./providers/payment-provider.registry";
+import { PaymentWebhookEvent } from "./providers/payment-provider.types";
 
 export interface WebhookResult {
   outcome: "processed" | "ignored_already_processed" | "status_conflict";
@@ -50,10 +52,24 @@ export class PaymentWebhookService {
     const adapter = this.registry.get(provider);
 
     if (!adapter.verifySignature(rawBody, signatureHeader, timestampHeader)) {
+      // BIL-09 (docs/audit/BILLING-AUDIT.md) : providerReference pas encore
+      // connu à ce stade (signature vérifiée avant tout parsing du corps).
+      await this.auditRejection({ httpStatus: 401, reason: "invalid_signature_or_timestamp", provider, rawBody });
       throw new UnauthorizedException("Signature de webhook invalide");
     }
 
-    const event = adapter.parseEvent(rawBody);
+    // Un corps syntaxiquement invalide (JSON cassé) n'atteint jamais ce
+    // bloc : le body-parser Express (activé par rawBody: true, main.ts) le
+    // rejette en amont avec sa propre erreur 400, avant même le routage
+    // Nest. Ce qui reste réellement atteignable ici, c'est un JSON valide
+    // dont la forme ne correspond pas au schéma attendu (paymentWebhookEventSchema).
+    let event: PaymentWebhookEvent;
+    try {
+      event = adapter.parseEvent(rawBody);
+    } catch (error) {
+      await this.auditRejection({ httpStatus: 400, reason: "malformed_body", provider, rawBody });
+      throw error;
+    }
 
     const payment = await this.prisma.payment.findUnique({
       where: { provider_providerReference: { provider, providerReference: event.providerReference } },
@@ -65,6 +81,13 @@ export class PaymentWebhookService {
     // sur la seule redirection du navigateur" — même logique pour un webhook
     // sans paiement amorcé correspondant).
     if (!payment) {
+      await this.auditRejection({
+        httpStatus: 404,
+        reason: "unknown_payment_reference",
+        provider,
+        rawBody,
+        providerReference: event.providerReference,
+      });
       throw new NotFoundException("Aucun paiement en attente pour cette référence");
     }
 
@@ -126,10 +149,28 @@ export class PaymentWebhookService {
     }
 
     if (payment.amount !== event.amount || payment.currency !== event.currency) {
+      await this.auditRejection({
+        httpStatus: 400,
+        reason: "amount_or_currency_mismatch",
+        provider,
+        rawBody,
+        providerReference: event.providerReference,
+        enterpriseId: payment.enterpriseId,
+        paymentId: payment.id,
+      });
       throw new BadRequestException("Le montant du webhook ne correspond pas au paiement en attente");
     }
 
     if (!payment.subscriptionId) {
+      await this.auditRejection({
+        httpStatus: 409,
+        reason: "payment_without_subscription",
+        provider,
+        rawBody,
+        providerReference: event.providerReference,
+        enterpriseId: payment.enterpriseId,
+        paymentId: payment.id,
+      });
       throw new ConflictException("Paiement sans abonnement associé");
     }
 
@@ -222,6 +263,15 @@ export class PaymentWebhookService {
       });
     } catch (error) {
       if (error instanceof InvalidSubscriptionTransitionError) {
+        await this.auditRejection({
+          httpStatus: 409,
+          reason: "invalid_subscription_transition",
+          provider,
+          rawBody,
+          providerReference: event.providerReference,
+          enterpriseId: payment.enterpriseId,
+          paymentId: payment.id,
+        });
         throw new ConflictException(error.message);
       }
       throw error;
@@ -245,6 +295,44 @@ export class PaymentWebhookService {
     await this.notifyEnterprise(payment.enterpriseId, event.status, subscriptionAfter);
 
     return { outcome: "processed", paymentId: payment.id };
+  }
+
+  // BIL-09 (docs/audit/BILLING-AUDIT.md) : chaque rejet devient détectable —
+  // jamais le corps brut ni aucun secret, uniquement une empreinte SHA-256
+  // (aucune valeur ajoutée à conserver le corps en clair pour un rejet, et
+  // CLAUDE.md §6 interdit d'écrire un secret/payload sensible dans un log ou
+  // un audit). Ne remplace ni BIL-01 (idempotence, compare-and-swap
+  // transactionnel) ni BIL-06 (fraîcheur du timestamp) — ceci ne fait que
+  // rendre visibles des rejets qui existaient déjà.
+  private async auditRejection(params: {
+    httpStatus: number;
+    reason: string;
+    provider: PaymentProvider;
+    rawBody: Buffer;
+    providerReference?: string;
+    enterpriseId?: string;
+    paymentId?: string;
+  }): Promise<void> {
+    const bodyHash = createHash("sha256").update(params.rawBody).digest("hex");
+
+    await this.auditLog.record({
+      enterpriseId: params.enterpriseId,
+      action: "PAYMENT_WEBHOOK_REJECTED",
+      resource: "PaymentWebhook",
+      resourceId: params.paymentId,
+      metadata: {
+        httpStatus: params.httpStatus,
+        reason: params.reason,
+        provider: params.provider,
+        providerReference: params.providerReference,
+        bodyHash,
+      },
+    });
+
+    this.logger.warn(
+      `Webhook de paiement rejeté (${params.httpStatus}) : ${params.reason} ` +
+        `(provider=${params.provider}${params.providerReference ? `, ref=${params.providerReference}` : ""}).`,
+    );
   }
 
   private async notifyEnterprise(

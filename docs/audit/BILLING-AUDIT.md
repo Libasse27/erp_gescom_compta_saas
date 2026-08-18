@@ -560,7 +560,59 @@ et écrit sur stdout (BIL-11).
   aussi d'anti-rejeu (BIL-06) et d'idempotence structurelle (BIL-01). Journaliser en
   audit tout rejet, et alerter sur seuil d'échecs de signature.
 - **Priorité** : P2
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-18) — **écart assumé par rapport à la solution
+  proposée ci-dessus** : pas de table `webhook_events` dédiée. Au moment de ce
+  correctif, les deux finalités que cette table devait servir sont déjà closes
+  par des mécanismes différents et déjà testés : l'idempotence structurelle par
+  BIL-01 (compare-and-swap transactionnel sur `Payment.status`) et l'anti-rejeu
+  par BIL-06 (fenêtre de fraîcheur du timestamp signé). Construire la table
+  aurait donc dupliqué, en plus lourd, des garanties déjà en place — ce n'est
+  plus ce que BIL-09 doit apporter. Le seul objectif réellement restant —
+  rendre chaque rejet détectable — est couvert par une nouvelle valeur
+  d'`AuditAction` dédiée, `PAYMENT_WEBHOOK_REJECTED` (migration additive
+  `20260818205014_add_payment_webhook_rejected_audit_action`, même patron que
+  BIL-03/BIL-04), plutôt que de réutiliser `PAYMENT` (qui aurait mélangé
+  paiements réellement traités et tentatives rejetées, rendant tout filtrage
+  futur ambigu).
+
+  `PaymentWebhookService` gagne une méthode privée `auditRejection(...)`,
+  appelée juste avant chacun des rejets existants (aucun code HTTP modifié) :
+  signature/timestamp invalide (401), corps JSON valide mais de forme
+  invalide (400, nouveau `try/catch` autour de `adapter.parseEvent` — une
+  **syntaxe** JSON cassée, elle, n'atteint jamais ce code : le body-parser
+  Express, activé par `rawBody: true`, la rejette en amont avec sa propre
+  erreur 400 avant même le routage Nest ; constaté en écrivant le test dédié,
+  corrigé dans ce même correctif), référence de paiement inconnue (404),
+  montant/devise divergents (400), paiement sans abonnement (409), transition
+  de statut invalide résiduelle post-BIL-08 (409, ex. `SUSPENDED`/`CANCELLED`/
+  `EXPIRED` + `FAILED`). Chaque entrée porte `provider`, `httpStatus`,
+  `reason`, `providerReference` (quand déjà connu à ce stade — pas disponible
+  pour un rejet de signature, la signature étant vérifiée avant tout parsing
+  du corps), et une empreinte **SHA-256** du corps brut (`node:crypto`, aucune
+  nouvelle dépendance) — **jamais le corps ni un secret en clair**, conforme à
+  CLAUDE.md §6. Un log structuré `warn` (même `Logger` applicatif que BIL-07)
+  accompagne chaque entrée pour une détection immédiate via les logs, sans
+  nouvelle infrastructure d'alerting (pas de compteur à seuil glissant — la
+  même limitation déjà documentée dans `docs/deployment/PRODUCTION.md` pour le
+  scaling).
+
+  **Exclu du périmètre, décision produit confirmée** : le rejet « fournisseur
+  inconnu dans l'URL » (`payment-provider.registry.ts`) n'est pas audité — il
+  vit dans un autre composant (le registre, pas le service), ne porte aucune
+  donnée de paiement, et aucun critère de sécurité déjà défini (CLAUDE.md §6,
+  ADR 0010) n'exige explicitement sa traçabilité ; aucun conflit constaté avec
+  les critères existants.
+
+  Vérifié par les 6 tests de rejet existants (401 sans signature, 401 mauvais
+  secret, 401 sans timestamp, 401 timestamp expiré, 404 référence inconnue,
+  400 montant divergent), chacun étendu d'une assertion sur l'entrée d'audit
+  créée, plus 2 nouveaux tests (corps JSON malformé, paiement sans
+  `subscriptionId` — deux chemins jusque-là non couverts par aucun test) et
+  une non-régression explicite : ni un succès ni un `status_conflict` (BIL-07)
+  ne crée jamais cette entrée. Migration testée `up` sur la base de dev.
+  `pnpm typecheck`/`lint`/`test`/`test:tenant`/`build` tous verts ; BIL-01 à
+  BIL-08 non régressés (aucune de leurs suites de tests modifiée en dehors des
+  assertions ajoutées ci-dessus).
 
 ### BIL-10
 
