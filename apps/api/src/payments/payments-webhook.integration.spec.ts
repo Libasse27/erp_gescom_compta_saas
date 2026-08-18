@@ -346,6 +346,94 @@ describe("PaymentsWebhookController (integration)", () => {
     expect(invoices).toHaveLength(0);
   });
 
+  // BIL-07 (docs/audit/BILLING-AUDIT.md) : un événement différent d'un
+  // paiement déjà résolu n'est jamais un simple rejeu — il doit être
+  // détectable, jamais avalé silencieusement.
+  it("flags as a conflict a SUCCEEDED event arriving after a FAILED already recorded, without activating the subscription", async () => {
+    const { enterprise, subscription } = await createEnterpriseWithActiveUser("ACTIVE");
+    const { paymentId, providerReference } = await createPendingPayment(enterprise.id, subscription.id);
+
+    await postWebhook(
+      "WAVE",
+      { reference: providerReference, status: "failed", amount: 5_000, currency: "XOF" },
+      wave.secret,
+    ).expect(200);
+
+    const conflictRes = await postWebhook(
+      "WAVE",
+      { reference: providerReference, status: "succeeded", amount: 5_000, currency: "XOF" },
+      wave.secret,
+    ).expect(200);
+    expect(conflictRes.body.outcome).toBe("status_conflict");
+
+    const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
+    expect(payment.status).toBe("FAILED");
+    expect(payment.metadata).toMatchObject({
+      conflictingEvent: { status: "SUCCEEDED", detectedAgainstStatus: "FAILED" },
+    });
+
+    const updatedSubscription = await prisma.subscription.findUniqueOrThrow({ where: { id: subscription.id } });
+    expect(updatedSubscription.status).toBe("PAST_DUE");
+
+    const invoices = await prisma.invoice.findMany({ where: { enterpriseId: enterprise.id } });
+    expect(invoices).toHaveLength(0);
+
+    const logs = await prisma.auditLog.findMany({ where: { enterpriseId: enterprise.id, resourceId: paymentId } });
+    const anomalyLogs = logs.filter((log) => (log.metadata as Record<string, unknown> | null)?.anomaly === true);
+    expect(anomalyLogs).toHaveLength(1);
+    expect(anomalyLogs[0]!.metadata).toMatchObject({
+      anomaly: true,
+      severity: "high",
+      previousStatus: "FAILED",
+      incomingStatus: "SUCCEEDED",
+    });
+  });
+
+  it("flags as a conflict a FAILED event arriving after a SUCCEEDED already recorded, without reverting the subscription", async () => {
+    const { enterprise, subscription } = await createEnterpriseWithActiveUser("TRIAL");
+    const { paymentId, providerReference } = await createPendingPayment(enterprise.id, subscription.id);
+
+    await postWebhook(
+      "WAVE",
+      { reference: providerReference, status: "succeeded", amount: 5_000, currency: "XOF" },
+      wave.secret,
+    ).expect(200);
+
+    const conflictRes = await postWebhook(
+      "WAVE",
+      { reference: providerReference, status: "failed", amount: 5_000, currency: "XOF" },
+      wave.secret,
+    ).expect(200);
+    expect(conflictRes.body.outcome).toBe("status_conflict");
+
+    const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
+    expect(payment.status).toBe("SUCCEEDED");
+
+    const updatedSubscription = await prisma.subscription.findUniqueOrThrow({ where: { id: subscription.id } });
+    expect(updatedSubscription.status).toBe("ACTIVE");
+
+    const invoices = await prisma.invoice.findMany({ where: { enterpriseId: enterprise.id } });
+    expect(invoices).toHaveLength(1);
+
+    const logs = await prisma.auditLog.findMany({ where: { enterpriseId: enterprise.id, resourceId: paymentId } });
+    const anomalyLogs = logs.filter((log) => (log.metadata as Record<string, unknown> | null)?.anomaly === true);
+    expect(anomalyLogs).toHaveLength(1);
+  });
+
+  it("does not flag a legitimate replay of the same status as a conflict (no anomaly audit entry)", async () => {
+    const { enterprise, subscription } = await createEnterpriseWithActiveUser("TRIAL");
+    const { paymentId, providerReference } = await createPendingPayment(enterprise.id, subscription.id);
+    const payload = { reference: providerReference, status: "succeeded", amount: 5_000, currency: "XOF" };
+
+    await postWebhook("WAVE", payload, wave.secret).expect(200);
+    const replayRes = await postWebhook("WAVE", payload, wave.secret).expect(200);
+    expect(replayRes.body.outcome).toBe("ignored_already_processed");
+
+    const logs = await prisma.auditLog.findMany({ where: { enterpriseId: enterprise.id, resourceId: paymentId } });
+    const anomalyLogs = logs.filter((log) => (log.metadata as Record<string, unknown> | null)?.anomaly === true);
+    expect(anomalyLogs).toHaveLength(0);
+  });
+
   it("rejects the bootstrap endpoint for a non-Super-Admin", async () => {
     const { enterprise, subscription, user } = await createEnterpriseWithActiveUser("TRIAL");
     void subscription;

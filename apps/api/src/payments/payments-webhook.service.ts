@@ -1,4 +1,11 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnauthorizedException,
+} from "@nestjs/common";
 import { Subscription, SubscriptionStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditLogService } from "../common/audit/audit-log.service";
@@ -12,7 +19,7 @@ import { InvoiceGenerationService } from "./invoice-generation.service";
 import { PaymentProviderRegistry } from "./providers/payment-provider.registry";
 
 export interface WebhookResult {
-  outcome: "processed" | "ignored_already_processed";
+  outcome: "processed" | "ignored_already_processed" | "status_conflict";
   paymentId: string;
 }
 
@@ -23,6 +30,8 @@ export interface WebhookResult {
 // unique en base (docs/PROMPT-MAITRE-SAAS.md Phase 5).
 @Injectable()
 export class PaymentWebhookService {
+  private readonly logger = new Logger(PaymentWebhookService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly registry: PaymentProviderRegistry,
@@ -59,10 +68,61 @@ export class PaymentWebhookService {
       throw new NotFoundException("Aucun paiement en attente pour cette référence");
     }
 
-    // Rejoué (2e, 3e appel du même événement) : no-op idempotent, pas une erreur
-    // — un fournisseur de paiement s'attend à un succès sur un webhook rejoué.
     if (payment.status !== "PENDING") {
-      return { outcome: "ignored_already_processed", paymentId: payment.id };
+      // event.status normalisé par l'adaptateur (SUCCEEDED/FAILED, voir
+      // HmacPaymentProviderAdapter.parseEvent) — comparable tel quel à
+      // payment.status (PaymentStatus Prisma).
+      if (event.status === payment.status) {
+        // Rejoué (2e, 3e appel du même événement) : no-op idempotent, pas une
+        // erreur — un fournisseur de paiement s'attend à un succès sur un
+        // webhook rejoué.
+        return { outcome: "ignored_already_processed", paymentId: payment.id };
+      }
+
+      // BIL-07 (docs/audit/BILLING-AUDIT.md) : un événement différent sur un
+      // paiement déjà résolu (ex. SUCCEEDED après un FAILED déjà enregistré)
+      // n'est jamais un simple rejeu — c'est une anomalie financière
+      // potentielle (encaissement réel jamais reflété). Ne jamais
+      // l'activer/facturer automatiquement a posteriori (date d'effet et
+      // période déjà écoulée ambiguës) : on répond 200 (pas de retentatives
+      // en boucle côté fournisseur) tout en la rendant détectable —
+      // AuditLog + log structuré, jamais un succès silencieux.
+      await this.prisma.payment.update({
+        where: { id: payment.id },
+        data: {
+          metadata: {
+            conflictingEvent: {
+              status: event.status,
+              detectedAgainstStatus: payment.status,
+              receivedAt: new Date().toISOString(),
+            },
+          },
+        },
+      });
+
+      await this.auditLog.record({
+        enterpriseId: payment.enterpriseId,
+        action: "PAYMENT",
+        resource: "Payment",
+        resourceId: payment.id,
+        metadata: {
+          anomaly: true,
+          severity: "high",
+          reason: "status_conflict_after_terminal_state",
+          provider,
+          providerReference: event.providerReference,
+          previousStatus: payment.status,
+          incomingStatus: event.status,
+        },
+      });
+
+      this.logger.error(
+        `Webhook de paiement en conflit : paiement ${payment.id} déjà ${payment.status}, ` +
+          `événement entrant ${event.status} (provider=${provider}, ref=${event.providerReference}). ` +
+          "Aucune transition automatique effectuée — réconciliation manuelle requise.",
+      );
+
+      return { outcome: "status_conflict", paymentId: payment.id };
     }
 
     if (payment.amount !== event.amount || payment.currency !== event.currency) {

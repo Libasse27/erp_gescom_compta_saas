@@ -462,7 +462,31 @@ et écrit sur stdout (BIL-11).
   réconciliation et alerter, tout en répondant 200 au fournisseur. Ne jamais retourner
   un succès silencieux sur une divergence d'état financier.
 - **Priorité** : P2
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-18) — le bloc `payment.status !== "PENDING"`
+  distingue désormais un rejeu légitime (`event.status === payment.status` :
+  comportement inchangé, `ignored_already_processed`) d'une divergence
+  (`event.status !== payment.status` sur un statut déjà terminal) :
+  `Payment.metadata` (JSON, aucune migration) enrichi du détail de
+  l'événement en conflit, entrée `AuditLog` (`action: "PAYMENT"`,
+  `metadata: { anomaly: true, severity: "high", ... }`) et log `error`
+  structuré (`new Logger(PaymentWebhookService.name)`, capté par
+  `StructuredLoggerService`, même patron que
+  `SubscriptionLifecycleService`). Réponse `200` conservée dans tous les
+  cas (pas de retentatives en boucle côté fournisseur), nouvel `outcome:
+  "status_conflict"` distinct de `"ignored_already_processed"`. Choix
+  produit assumé : **aucune activation/facturation automatique** n'est
+  déclenchée sur cette divergence tardive (date d'effet et période déjà
+  écoulée ambiguës) — c'est un signal de détection pour réconciliation
+  manuelle, pas une résolution automatique. Vérifié par 3 tests dédiés
+  (`payments-webhook.integration.spec.ts`) : `SUCCEEDED` après `FAILED`
+  déjà enregistré (abonnement reste `PAST_DUE`, aucune facture créée),
+  cas symétrique `FAILED` après `SUCCEEDED` (abonnement reste `ACTIVE`,
+  aucune facture dupliquée), et non-régression explicite sur le rejeu
+  légitime (même statut) : aucune entrée d'anomalie créée. Les tests
+  BIL-01 (idempotence séquentielle et concurrente) restent verts sans
+  modification — la branche modifiée n'est jamais exercée par le
+  scénario de concurrence (la course se joue dans la transaction, pas
+  dans ce bloc).
 
 ### BIL-08
 
