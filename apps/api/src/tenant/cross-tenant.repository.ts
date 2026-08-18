@@ -38,12 +38,47 @@ export class CrossTenantRepository {
     subscriptionId: string;
     fromStatus: SubscriptionStatus;
     toStatus: SubscriptionStatus;
-    fromPlanId: string;
-    toPlanId: string;
+    fromPlanId?: string;
+    toPlanId?: string;
     reason?: string;
-    triggeredByUserId: string;
+    triggeredByUserId?: string;
   }): Promise<{ id: string }> {
     return this.prisma.subscriptionEvent.create({ data, select: { id: true } });
+  }
+
+  // Corrige BIL-03 (docs/audit/BILLING-AUDIT.md) : source de vérité pour
+  // SubscriptionLifecycleService — un essai expire dès que trialEndDate est
+  // dépassée, indépendamment de toute action utilisateur.
+  findExpirableTrialSubscriptions(now: Date): Promise<Subscription[]> {
+    return this.prisma.subscription.findMany({
+      where: { status: "TRIAL", trialEndDate: { lt: now } },
+    });
+  }
+
+  // renewalDate porte l'échéance de grâce pendant PAST_DUE (repoussée par
+  // PaymentWebhookService à chaque échec, voir payments-webhook.service.ts),
+  // pas la date de renouvellement normale d'un abonnement ACTIVE.
+  findOverdueGracePeriodSubscriptions(now: Date): Promise<Subscription[]> {
+    return this.prisma.subscription.findMany({
+      where: { status: "PAST_DUE", renewalDate: { lt: now } },
+    });
+  }
+
+  // Compare-and-swap (même patron que PaymentWebhookService, BIL-01) : un
+  // appelant qui a lu `fromStatus` dans un batch en mémoire (voir
+  // SubscriptionLifecycleService) peut trouver, au moment d'écrire, que le
+  // statut a déjà changé entre-temps (ex. un webhook de paiement concurrent
+  // a fait passer PAST_DUE -> ACTIVE) — `count: 0` signale ce cas, jamais
+  // d'écrasement d'un état plus frais.
+  updateSubscriptionStatus(
+    subscriptionId: string,
+    fromStatus: SubscriptionStatus,
+    toStatus: SubscriptionStatus,
+  ): Promise<{ count: number }> {
+    return this.prisma.subscription.updateMany({
+      where: { id: subscriptionId, status: fromStatus },
+      data: { status: toStatus },
+    });
   }
 
   // Amorce un Payment(PENDING) — tient lieu de flux de checkout réel, qui

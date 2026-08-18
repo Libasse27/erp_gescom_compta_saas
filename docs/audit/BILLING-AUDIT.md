@@ -279,7 +279,30 @@ et écrit sur stdout (BIL-11).
   explicitement (produit) du traitement de `PAST_DUE` dans `BLOCKING_STATUSES`.
   Tests d'intégration : essai échu ⇒ écriture refusée ; impayé après grâce ⇒ suspendu.
 - **Priorité** : P1
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-17) — `SubscriptionLifecycleService`
+  (`apps/api/src/subscriptions/subscription-lifecycle.service.ts`), exécuté
+  toutes les heures via `@Cron` (`@nestjs/schedule`) : `TRIAL` dont
+  `trialEndDate` est dépassée → `EXPIRED` ; `PAST_DUE` dont `renewalDate`
+  (échéance de grâce, déjà repoussée par `PaymentWebhookService` à chaque
+  échec) est dépassée → `SUSPENDED`. Chaque transition passe par
+  `assertSubscriptionTransition` + `SubscriptionEvent` + `AuditLog`
+  (nouvelles actions `EXPIRE_TRIAL`/`SUSPEND_SUBSCRIPTION`, migration
+  additive `20260817221428_add_subscription_lifecycle_audit_actions`).
+  Idempotent par construction (chaque transition sort l'abonnement du
+  filtre de la requête suivante), et une transition en échec sur un
+  abonnement n'interrompt jamais le traitement des autres. Décision produit
+  prise pour ce lot : `PAST_DUE` reste hors de `BLOCKING_STATUSES` (accès
+  complet pendant la grâce, comportement Phase 4 inchangé) — seul le passage
+  effectif à `SUSPENDED` après grâce déclenche le blocage déjà en place
+  (`SubscriptionAccessGuard`). Tests
+  (`subscription-lifecycle.integration.spec.ts`) : essai échu → `EXPIRED`
+  (+ événement + audit log), essai non échu et essai sans `trialEndDate`
+  jamais touchés, idempotence (deux exécutions consécutives ne créent
+  jamais un second `SubscriptionEvent`), impayé après grâce → `SUSPENDED`
+  (+ événement + audit log), grâce encore valide jamais touchée, un
+  abonnement `ACTIVE` jamais affecté, et bout-en-bout : une requête mutante
+  d'un tenant dont l'essai vient d'expirer est bien refusée en 403 par
+  `SubscriptionAccessGuard`.
 
 ### BIL-04
 

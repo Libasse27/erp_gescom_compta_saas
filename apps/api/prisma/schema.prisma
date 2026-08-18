@@ -139,6 +139,12 @@ enum AuditAction {
   // Corrige SEC-03 (docs/audit/SECURITY-AUDIT.md) : refresh rejeté car
   // User.status ou Enterprise.status n'est plus ACTIVE.
   REFRESH_REJECTED_INACTIVE_ACCOUNT
+  // Corrige BIL-03 (docs/audit/BILLING-AUDIT.md) : transitions automatiques
+  // du cycle de vie de l'abonnement (SubscriptionLifecycleService), pas une
+  // action d'un utilisateur — distinctes de SUSPEND_ACCOUNT/REACTIVATE_ACCOUNT
+  // (BIL-04, Enterprise.status, déclenché par un Super Admin).
+  EXPIRE_TRIAL
+  SUSPEND_SUBSCRIPTION
 }
 
 // ACTIVE : jamais utilisé. ROTATED : échangé contre un nouveau token (rotation

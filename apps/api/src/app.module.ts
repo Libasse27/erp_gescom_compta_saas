@@ -1,5 +1,6 @@
 import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
 import { APP_FILTER, APP_GUARD } from "@nestjs/core";
+import { ScheduleModule } from "@nestjs/schedule";
 import { ThrottlerGuard, ThrottlerModule } from "@nestjs/throttler";
 import { SentryGlobalFilter, SentryModule } from "@sentry/nestjs/setup";
 import { PrismaModule } from "./prisma/prisma.module";
@@ -44,6 +45,10 @@ import { HttpLoggingMiddleware } from "./common/logging/http-logging.middleware"
     // Limite globale par défaut ; /auth/* applique une limite plus stricte
     // via @Throttle (CLAUDE.md §6).
     ThrottlerModule.forRoot([GLOBAL_RATE_LIMIT]),
+    // Corrige BIL-03 (docs/audit/BILLING-AUDIT.md) : rend exécutable le
+    // @Cron de SubscriptionLifecycleService — forRoot() une seule fois, à la
+    // racine, quel que soit le module qui déclare le provider concerné.
+    ScheduleModule.forRoot(),
     LoggingModule,
     HealthModule,
     PrismaModule,
