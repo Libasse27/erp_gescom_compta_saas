@@ -151,6 +151,13 @@ enum AuditAction {
   // statut invalide) devient détectable — jusqu'ici silencieux au-delà de
   // la ligne HTTP générique.
   PAYMENT_WEBHOOK_REJECTED
+  // Corrige BIL-12 (docs/audit/BILLING-AUDIT.md) : édition du catalogue
+  // plateforme (plans/features/limites) par le Super Admin — distinctes de
+  // CHANGE_PLAN (une entreprise change d'abonnement vers un plan existant).
+  CREATE_PLAN
+  UPDATE_PLAN
+  UPDATE_PLAN_FEATURE
+  UPDATE_PLAN_LIMIT
 }
 
 // ACTIVE : jamais utilisé. ROTATED : échangé contre un nouveau token (rotation
@@ -875,9 +882,14 @@ model Plan {
   @@map("plans")
 }
 
-// Catalogue de features booléennes, plateforme. L'association à un plan
-// (PlanFeature) est éditable en base par le Super Admin — jamais codée en
-// dur côté frontend ni backend (docs/adr/0005-stockage-entitlements.md).
+// Catalogue de features booléennes, plateforme. Corrige BIL-12
+// (docs/audit/BILLING-AUDIT.md, docs/adr/0005-stockage-entitlements.md) :
+// l'association à un plan (PlanFeature.enabled) est éditable par le Super
+// Admin via PUT /admin/plans/:id/features/:featureKey
+// (PlansAdminController) — jamais codée en dur côté frontend ni backend.
+// Le catalogue des CLÉS elles-mêmes (quelles features existent) reste en
+// revanche défini par le code + prisma/seed.ts, jamais créé dynamiquement
+// par cette route (même raisonnement que le catalogue `Permission`).
 model Feature {
   id          String   @id @default(uuid()) @db.Uuid
   key         String   @unique

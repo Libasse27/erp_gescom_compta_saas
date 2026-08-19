@@ -16,6 +16,7 @@ import { NotificationsModule } from "./notifications/notifications.module";
 import { OnboardingModule } from "./onboarding/onboarding.module";
 import { PaymentsModule } from "./payments/payments.module";
 import { PlansModule } from "./plans/plans.module";
+import { PlansAdminModule } from "./plans-admin/plans-admin.module";
 import { ProductsModule } from "./products/products.module";
 import { ProvisioningModule } from "./provisioning/provisioning.module";
 import { PurchasesModule } from "./purchases/purchases.module";
@@ -62,6 +63,7 @@ import { HttpLoggingMiddleware } from "./common/logging/http-logging.middleware"
     PaymentsModule,
     ProvisioningModule,
     PlansModule,
+    PlansAdminModule,
     RolesModule,
     SettingsModule,
     SuperAdminModule,

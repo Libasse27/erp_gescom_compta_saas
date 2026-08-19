@@ -1,0 +1,15 @@
+-- Corrige BIL-12 (docs/audit/BILLING-AUDIT.md) : la migration
+-- 20260816120000_add_identity_role accordait volontairement erp_app_identity
+-- en lecture seule sur plans/features/plan_features/limits/plan_limits
+-- ("Catalogue plateforme, lecture seule") car rien n'écrivait ces tables au
+-- runtime — seul prisma/seed.ts (rôle propriétaire `erp`) le faisait.
+-- PlansAdminRepository (Super Admin) écrit désormais légitimement dans
+-- plans/plan_features/plan_limits : étend le GRANT en conséquence, table
+-- par table, strictement au périmètre nécessaire.
+--
+-- features et limits restent volontairement en lecture seule : le
+-- catalogue de CLÉS (quelles features/limites existent) reste défini par le
+-- code + prisma/seed.ts, jamais créé dynamiquement par une route Super
+-- Admin (même raisonnement que PERMISSION_KEYS/permissions, qui restent
+-- également en lecture seule ici, non concernées par ce correctif).
+GRANT INSERT, UPDATE ON plans, plan_features, plan_limits TO erp_app_identity;

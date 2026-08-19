@@ -34,3 +34,25 @@ coût d'un recalcul serveur.
   vérification de feature dispersée dans les services métier.
 - Le frontend masque également les modules indisponibles (UX), mais ce n'est
   jamais la seule protection : le backend refuse systématiquement, testé.
+
+## Mise à jour — BIL-12 (docs/audit/BILLING-AUDIT.md, 2026-08-19)
+
+Corrige un écart entre ce document et le code réel : jusqu'ici, aucune route
+n'existait pour éditer le catalogue de plans/features/limites — seul
+`prisma/seed.ts` (rôle propriétaire, hors runtime) y écrivait, malgré des
+commentaires `schema.prisma` affirmant le contraire.
+
+`PlansAdminController` (`PUT/PATCH/POST /admin/plans/...`, Super Admin
+uniquement) permet désormais de créer/éditer un plan et d'activer une
+feature ou fixer une limite **déjà présente dans le catalogue de clés**
+(`Feature.key`/`Limit.key`) — jamais d'en créer une nouvelle dynamiquement,
+ce catalogue de clés reste défini par le code + le seed, exactement comme
+`PERMISSION_KEYS`.
+
+Ce changement ne remet pas en cause la décision ci-dessus : le cache court
+d'`EntitlementsService` (§ Décision) n'est **pas invalidé explicitement**
+par ces nouvelles routes, exactement comme `SubscriptionsService.changePlan`
+ne l'invalide pas non plus déjà aujourd'hui — la même garantie de fraîcheur
+"au pire la durée du TTL" (`ENTITLEMENTS_CACHE_TTL_MS`, 5s par défaut)
+s'applique, cohérente avec le reste du système plutôt qu'une nouvelle
+mécanique d'invalidation ad hoc.

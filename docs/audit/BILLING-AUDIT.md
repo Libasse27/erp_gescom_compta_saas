@@ -771,7 +771,21 @@ et écrit sur stdout (BIL-11).
   immédiatement les commentaires et l'ADR 0005 pour refléter l'état réel. Ne pas
   laisser la documentation décrire une capacité inexistante.
 - **Priorité** : P2
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-19) — `PlansAdminController` (nouveau module
+  `plans-admin/`, `POST/PATCH/GET /admin/plans`, `PUT
+  /admin/plans/:id/features/:featureKey`, `PUT /admin/plans/:id/limits/:limitKey`),
+  réservé au Super Admin (`JwtAuthGuard` + `SuperAdminGuard`), validation Zod
+  (`@erp/validation/plans-admin`), audit dédié (4 nouvelles valeurs `AuditAction` :
+  `CREATE_PLAN`, `UPDATE_PLAN`, `UPDATE_PLAN_FEATURE`, `UPDATE_PLAN_LIMIT` —
+  migration additive, distinctes de `CHANGE_PLAN` qui reste réservée au
+  changement d'abonnement d'une entreprise). Cache d'entitlements non invalidé
+  explicitement : même garantie de fraîcheur (TTL court) que
+  `SubscriptionsService.changePlan` aujourd'hui, voir ADR-0005 §"Mise à jour —
+  BIL-12". Périmètre volontairement restreint : une feature/limite ne peut être
+  configurée que si sa clé existe déjà dans le catalogue (`Feature`/`Limit`) —
+  aucune création dynamique de clé, ce catalogue reste défini par le code et
+  `prisma/seed.ts` (même raisonnement que `PERMISSION_KEYS`). Commentaires
+  `schema.prisma` corrigés pour décrire exactement ce périmètre.
 
 ### BIL-13
 
@@ -1009,7 +1023,7 @@ et écrit sur stdout (BIL-11).
 | ADR 0003 | « aucune entreprise à moitié créée ne doit exister » | Vrai en base, faux au niveau du parcours (post-commit non compensé) |
 | ADR 0010 | Cite la tolérance de rejeu bornée dans le temps comme état de l'art | Non implémentée (BIL-06) |
 | ADR 0005 | « changement de plan […] se répercute sans attendre » | Vrai à ~5 s près en production ; le test qui l'atteste tourne avec TTL=0 (BIL-17) |
-| `schema.prisma:831-833` | Association feature↔plan « éditable en base par le Super Admin » | Aucune API d'édition, seul le seed écrit (BIL-12) |
+| `schema.prisma:831-833` | Association feature↔plan « éditable en base par le Super Admin » | Corrigé (BIL-12) : `PlansAdminController` implémente désormais cette édition |
 | `payments-webhook.service.ts:22-23` | « Idempotence par (provider, providerReference) — champ unique en base » | L'unique porte sur le paiement, pas sur le traitement de l'événement (BIL-01/BIL-02) |
 
 ---
