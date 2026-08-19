@@ -1,6 +1,8 @@
 const path = require("node:path");
 const net = require("node:net");
 const { execSync } = require("node:child_process");
+const { PrismaClient } = require("@prisma/client");
+const { PERMISSION_KEYS } = require("@erp/permissions");
 require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
 const DOCKER_COMPOSE_FILE = path.resolve(__dirname, "../../../docker/docker-compose.dev.yml");
@@ -67,4 +69,28 @@ module.exports = async function globalSetup() {
     env: { ...process.env, DATABASE_URL: testDatabaseUrl },
     stdio: "inherit",
   });
+
+  // Catalogue de permissions partagé, seedé une seule fois ici plutôt que
+  // par chaque suite *.integration.spec.ts (comme c'était le cas jusqu'ici :
+  // ~19 fichiers upsertaient chacun tout ou partie de PERMISSION_KEYS via
+  // leur propre PrismaClient). Corrige un P2002 flaky observé en CI : Jest
+  // lance plusieurs suites en parallèle (aucun --runInBand/--maxWorkers
+  // fixé) contre la même erp_saas_test, et deux upsert() concurrents sur une
+  // clé pas encore créée pouvaient tous deux emprunter la branche INSERT,
+  // l'un des deux perdant la course sur la contrainte unique Permission.key.
+  // globalSetup s'exécute une seule fois dans le process Jest principal,
+  // avant que le moindre worker ne démarre : aucune concurrence possible
+  // ici. createMany + skipDuplicates (INSERT ... ON CONFLICT DO NOTHING,
+  // atomique côté Postgres) plutôt qu'une boucle d'upsert : idempotent et
+  // sûr même si globalSetup était réexécuté ou appelé en parallèle d'un
+  // `prisma db seed` manuel.
+  const prisma = new PrismaClient({ datasources: { db: { url: testDatabaseUrl } } });
+  try {
+    await prisma.permission.createMany({
+      data: PERMISSION_KEYS.map((key) => ({ key })),
+      skipDuplicates: true,
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
 };

@@ -4,7 +4,7 @@ import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { AppModule } from "../app.module";
 import { RawDbClient } from "../prisma/raw-db-client";
-import { DEFAULT_ROLE_NAMES, DEFAULT_ROLE_PERMISSIONS, PERMISSION_KEYS } from "@erp/permissions";
+import { DEFAULT_ROLE_NAMES, DEFAULT_ROLE_PERMISSIONS } from "@erp/permissions";
 import { SYSCOHADA_ACCOUNT_CLASSES } from "./syscohada-chart-of-accounts";
 import { AccountRecoveryService } from "../auth/account-recovery.service";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -65,13 +65,10 @@ describe("ProvisioningController — POST /auth/register (integration)", () => {
     tokenService = app.get(TokenService);
 
     // Catalogue complet requis (DEFAULT_ROLE_PERMISSIONS couvre toutes les
-    // clés) : le seed global (prisma db seed) ne tourne pas automatiquement
-    // pour les tests, chaque suite upserte ce dont elle a besoin (comme
-    // "users.manage" ailleurs) — jamais supprimé, catalogue partagé entre
-    // suites parallèles.
-    for (const key of PERMISSION_KEYS) {
-      await prisma.permission.upsert({ where: { key }, create: { key }, update: {} });
-    }
+    // clés) : seedé une seule fois par global-setup.js (apps/api/test/),
+    // avant que Jest ne lance le moindre worker — plus besoin de le
+    // réupserter ici (c'était la source d'un P2002 flaky en CI sous
+    // parallélisme réel, cf. commentaire de global-setup.js).
   });
 
   afterAll(async () => {
