@@ -9,6 +9,31 @@ import { SYSCOHADA_ACCOUNT_CLASSES } from "./syscohada-chart-of-accounts";
 import { AccountRecoveryService } from "../auth/account-recovery.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { AuthService } from "../auth/auth.service";
+import { TokenService } from "../auth/token.service";
+import { MAIL_SENDER, MailMessage, MailSender } from "../notifications/mail-sender";
+
+// BIL-11 (docs/audit/BILLING-AUDIT.md) : capture ce qui est réellement
+// envoyé, indépendamment de ce qui est persisté dans `Notification.body` —
+// même patron que invitations.integration.spec.ts / account-recovery.integration.spec.ts.
+class CapturingMailSender implements MailSender {
+  public sent: MailMessage[] = [];
+
+  async send(message: MailMessage): Promise<void> {
+    this.sent.push(message);
+  }
+
+  lastTokenFor(email: string): string {
+    const message = [...this.sent].reverse().find((m) => m.to === email);
+    if (!message) {
+      throw new Error(`Aucun email capturé pour ${email}`);
+    }
+    const match = /: (\S+)$/.exec(message.body);
+    if (!match?.[1]) {
+      throw new Error("Jeton introuvable dans le corps de l'email capturé");
+    }
+    return match[1];
+  }
+}
 
 // Phase 6 (docs/PROMPT-MAITRE-SAAS.md) : provisioning automatique — une
 // seule transaction (docs/adr/0003-...), idempotence par l'unicité de
@@ -19,19 +44,25 @@ describe("ProvisioningController — POST /auth/register (integration)", () => {
   let accountRecovery: AccountRecoveryService;
   let notifications: NotificationsService;
   let authService: AuthService;
+  let tokenService: TokenService;
+  const mailSender = new CapturingMailSender();
 
   const createdEnterpriseIds: string[] = [];
   const createdPlanIds: string[] = [];
   const createdUserEmails: string[] = [];
 
   beforeAll(async () => {
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(MAIL_SENDER)
+      .useValue(mailSender)
+      .compile();
     app = moduleRef.createNestApplication();
     await app.init();
     prisma = new RawDbClient();
     accountRecovery = app.get(AccountRecoveryService);
     notifications = app.get(NotificationsService);
     authService = app.get(AuthService);
+    tokenService = app.get(TokenService);
 
     // Catalogue complet requis (DEFAULT_ROLE_PERMISSIONS couvre toutes les
     // clés) : le seed global (prisma db seed) ne tourne pas automatiquement
@@ -305,5 +336,36 @@ describe("ProvisioningController — POST /auth/register (integration)", () => {
       .send({ email: payload.email, password: payload.password })
       .expect(200);
     expect(typeof loginRes.body.accessToken).toBe("string");
+  });
+
+  // BIL-11 (docs/audit/BILLING-AUDIT.md) : le jeton de vérification d'email
+  // ne doit jamais être persisté en clair dans `Notification.body` (lisible
+  // par quiconque a un accès en lecture à la base), tout en continuant à
+  // atteindre réellement l'utilisateur par email.
+  it("never persists the raw email verification token in Notification.body, while still sending it in the email (BIL-11)", async () => {
+    const plan = await createPlan();
+    const payload = registerPayload({ planId: plan.id });
+
+    await request(app.getHttpServer()).post("/auth/register").send(payload).expect(201);
+
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: payload.email } });
+    createdEnterpriseIds.push(user.enterpriseId!);
+
+    // Non-régression : le jeton est bien présent dans l'email réellement
+    // envoyé, et c'est bien le jeton émis pour cet utilisateur (comparaison
+    // avec le hash stocké, pas une simple présence d'une chaîne quelconque).
+    const sentToken = mailSender.lastTokenFor(payload.email);
+    const verificationToken = await prisma.authToken.findUniqueOrThrow({
+      where: { tokenHash: tokenService.hashToken(sentToken) },
+    });
+    expect(verificationToken.userId).toBe(user.id);
+    expect(verificationToken.type).toBe("EMAIL_VERIFICATION");
+
+    // Le coeur de BIL-11 : ce même jeton ne doit apparaître nulle part dans
+    // le corps persisté de la notification "WELCOME".
+    const welcomeNotification = await prisma.notification.findFirstOrThrow({
+      where: { userId: user.id, type: "WELCOME" },
+    });
+    expect(welcomeNotification.body).not.toContain(sentToken);
   });
 });

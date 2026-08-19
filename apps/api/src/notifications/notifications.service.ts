@@ -9,7 +9,13 @@ export interface NotifyParams {
   type: NotificationType;
   to: string;
   subject: string;
+  // Persisté tel quel dans `Notification.body` — ne doit jamais porter de
+  // secret (jeton, mot de passe). Voir BIL-11 (docs/audit/BILLING-AUDIT.md).
   body: string;
+  // Contenu réellement envoyé par email quand il diffère de `body` (ex. un
+  // jeton qui doit atteindre l'utilisateur mais jamais être persisté).
+  // Jamais écrit en base. Retombe sur `body` si absent.
+  mailBody?: string;
 }
 
 // Comme AuditLogService : créé aussi bien avant qu'un tenant soit connu
@@ -37,6 +43,6 @@ export class NotificationsService {
       },
     });
 
-    await this.mailSender.send({ to: params.to, subject: params.subject, body: params.body });
+    await this.mailSender.send({ to: params.to, subject: params.subject, body: params.mailBody ?? params.body });
   }
 }

@@ -147,13 +147,17 @@ export class ProvisioningService {
     // manquerait, pas une capacité de connexion.
     try {
       const verificationToken = await this.accountRecovery.issueEmailVerificationToken(created.userId);
+      // BIL-11 (docs/audit/BILLING-AUDIT.md) : le jeton ne doit jamais
+      // atteindre `Notification.body` (persisté en base) — seul `mailBody`
+      // (jamais écrit en base, voir notifications.service.ts) le porte.
       await this.notifications.notify({
         userId: created.userId,
         enterpriseId: created.enterpriseId,
         type: "WELCOME",
         to: created.email,
         subject: "Bienvenue sur la plateforme",
-        body: `Votre entreprise a été créée. Jeton de vérification d'email (valable 24h) : ${verificationToken}`,
+        body: "Votre entreprise a été créée. Un email de vérification vous a été envoyé.",
+        mailBody: `Votre entreprise a été créée. Jeton de vérification d'email (valable 24h) : ${verificationToken}`,
       });
     } catch (error) {
       this.logger.error(

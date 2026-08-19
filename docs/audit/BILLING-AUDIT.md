@@ -702,7 +702,50 @@ et écrit sur stdout (BIL-11).
   démarrage si sélectionné hors développement) et masquer le corps dans sa sortie.
   À rapprocher de l'audit d'authentification si un autre agent le couvre.
 - **Priorité** : P2
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-19) — **portée réelle plus étroite que ce que
+  ce constat décrivait initialement**, vérifiée avant correctif :
+  - le volet journalisation (`ConsoleMailSender` écrivant le corps sur
+    stdout) est déjà couvert par **SEC-04**
+    (`docs/audit/SECURITY-AUDIT.md`), corrigé le 2026-08-16 — `send()`
+    n'écrit plus jamais `body`, seulement un `messageId` généré
+    (`mail-sender.spec.ts`) ;
+  - la réinitialisation de mot de passe (`account-recovery.service.ts`) et
+    l'invitation utilisateur (`invitations.service.ts`) n'utilisent **pas**
+    `NotificationsService.notify()` : les deux appellent `mailSender.send()`
+    directement et ne persistent donc jamais leur jeton en base. Le risque
+    d'aggravation anticipé par ce constat (« le même canal servira aux
+    jetons de réinitialisation ») ne s'est pas matérialisé ;
+  - seul restait le jeton de vérification d'email émis par
+    `ProvisioningService.register` (`provisioning.service.ts:150-159`),
+    seul appelant de `NotificationsService.notify()` à interpoler un secret
+    dans `body` — celui-ci est bien persisté tel quel dans
+    `Notification.body`.
+
+  Correctif (Option A, périmètre minimal) : `NotifyParams` gagne un champ
+  optionnel `mailBody?: string` (`notifications.service.ts`) — envoyé par
+  `mailSender.send()` à la place de `body` quand présent, jamais persisté.
+  `body` (persisté) reste toujours obligatoire et ne doit jamais porter de
+  secret. `provisioning.service.ts` passe désormais un texte neutre dans
+  `body` (« Un email de vérification vous a été envoyé. ») et le jeton
+  uniquement dans `mailBody`. Les deux autres appelants
+  (`payments-webhook.service.ts`, confirmation/échec de paiement) n'ont pas
+  de secret et continuent à n'utiliser que `body` — comportement inchangé,
+  `mailBody` retombe sur `body` par défaut. Aucune migration Prisma (aucun
+  changement de schéma).
+
+  Vérifié par un nouveau test dédié
+  (`provisioning.integration.spec.ts`, « never persists the raw email
+  verification token in Notification.body, while still sending it in the
+  email (BIL-11) ») : le jeton réellement envoyé (capturé via un
+  `MailSender` de test, même patron que
+  `invitations.integration.spec.ts`/`account-recovery.integration.spec.ts`)
+  est confronté au hash stocké dans `AuthToken` pour confirmer qu'il s'agit
+  bien du jeton émis pour cet utilisateur, puis son absence est vérifiée
+  dans le `body` persisté de la notification `WELCOME`. Les tests BIL-10
+  existants sur ce même bloc (panne d'émission du jeton, panne d'envoi de
+  la notification) restent verts sans modification de leur logique — seule
+  la construction de l'argument passé à `notify()` change, pas le
+  comportement de résilience post-commit.
 
 ### BIL-12
 
