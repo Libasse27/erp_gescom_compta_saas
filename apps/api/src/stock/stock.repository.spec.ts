@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { RawDbClient } from "../prisma/raw-db-client";
 import { TenantContext } from "../tenant/tenant-context";
@@ -181,6 +182,30 @@ describe("StockRepository", () => {
       const movements = await prisma.stockMovement.findMany({ where: { enterpriseId: enterprise.id } });
       expect(movements).toHaveLength(2);
     });
+  });
+
+  // Câblage de runWithSerializableRetry (docs/audit/BILLING-AUDIT.md, flake
+  // observé sur ce même test en CI) : simule un P2034 persistant sur toutes
+  // les tentatives — la retry logic elle-même est testée en isolation dans
+  // common/serializable-retry.spec.ts, ce test-ci vérifie uniquement que le
+  // contrat 409 existant survit à l'ajout du wrapper.
+  it("still surfaces a 409 ConflictException after exhausting retries on a persistent P2034", async () => {
+    const enterprise = await createEnterprise();
+    const product = await createTrackedProduct(enterprise.id);
+    const persistentConflict = new Prisma.PrismaClientKnownRequestError(
+      "Transaction failed due to a write conflict or a deadlock. Please retry your transaction",
+      { code: "P2034", clientVersion: "test" },
+    );
+    const runSpy = jest.spyOn(tenantPrisma, "run").mockRejectedValue(persistentConflict);
+
+    await asTenant(enterprise.id, () =>
+      expect(
+        repository.createMovement(enterprise.id, { productId: product.id, type: "IN", quantity: 1 }),
+      ).rejects.toThrow(ConflictException),
+    );
+    expect(runSpy).toHaveBeenCalledTimes(3); // maxAttempts par défaut de runWithSerializableRetry
+
+    runSpy.mockRestore();
   });
 
   it("only counts products with trackStock=true in the paginated stock level list", async () => {

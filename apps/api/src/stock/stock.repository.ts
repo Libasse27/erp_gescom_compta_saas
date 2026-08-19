@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { Prisma, StockMovement } from "@prisma/client";
 import { CreateStockMovementInput, ListStockMovementsQuery, ListStockQuery } from "@erp/validation";
 import { TenantScopedPrismaService } from "../tenant/tenant-scoped-prisma.service";
+import { runWithSerializableRetry } from "../common/serializable-retry";
 
 // Vue calculée (agrégation des mouvements), pas un modèle Prisma — miroir du
 // type StockLevel de @erp/types (packages/types, consommé par le frontend),
@@ -134,17 +135,21 @@ export class StockRepository {
   // solde — sous ReadCommitted, deux créations concurrentes sur le même
   // produit pourraient toutes deux lire le même solde de départ et laisser
   // passer un stock négatif. Postgres fait échouer l'une des deux
-  // transactions en conflit (erreur 40001 / Prisma P2034), rattrapée
-  // ci-dessous en 409.
+  // transactions en conflit (erreur 40001 / Prisma P2034) — runWithSerializableRetry
+  // rejoue quelques fois avant d'abandonner (observé flaky en CI sous forte
+  // contention parallèle entre suites, sans rapport avec un vrai deadlock
+  // applicatif) ; l'échec persistant reste rattrapé ci-dessous en 409.
   async createMovement(
     enterpriseId: string,
     input: CreateStockMovementInput,
     idempotencyKey?: string,
   ): Promise<CreateMovementResult> {
     try {
-      return await this.tenantPrisma.run(
-        (tx) => this.applyMovement(tx, enterpriseId, input, idempotencyKey),
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      return await runWithSerializableRetry(() =>
+        this.tenantPrisma.run(
+          (tx) => this.applyMovement(tx, enterpriseId, input, idempotencyKey),
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        ),
       );
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {

@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { RawDbClient } from "../prisma/raw-db-client";
 import { TenantContext } from "../tenant/tenant-context";
@@ -140,6 +141,36 @@ describe("PurchasesRepository", () => {
 
     const level = await asTenant(enterprise.id, () => stockRepository.getLevel(enterprise.id, product.id));
     expect(level.quantityOnHand).toBe(8);
+  });
+
+  // Câblage de runWithSerializableRetry — même patron que
+  // sales.repository.spec.ts : simule un P2034 persistant sur toutes les
+  // tentatives, vérifie uniquement que le contrat 409 existant survit à
+  // l'ajout du wrapper (la retry logic elle-même est testée en isolation
+  // dans common/serializable-retry.spec.ts).
+  it("still surfaces a 409 ConflictException after exhausting retries on a persistent P2034", async () => {
+    const enterprise = await createEnterprise();
+    const supplier = await createSupplier(enterprise.id);
+    const product = await createProduct(enterprise.id, { trackStock: false });
+    const purchase = await asTenant(enterprise.id, () =>
+      createPurchase(enterprise.id, {
+        supplierId: supplier.id,
+        lines: [{ productId: product.id, quantity: 1, unitCostExcludingTax: 10 }],
+      }),
+    );
+
+    const persistentConflict = new Prisma.PrismaClientKnownRequestError(
+      "Transaction failed due to a write conflict or a deadlock. Please retry your transaction",
+      { code: "P2034", clientVersion: "test" },
+    );
+    const runSpy = jest.spyOn(tenantPrisma, "run").mockRejectedValue(persistentConflict);
+
+    await expect(asTenant(enterprise.id, () => repository.confirm(enterprise.id, purchase.id))).rejects.toThrow(
+      ConflictException,
+    );
+    expect(runSpy).toHaveBeenCalledTimes(3); // maxAttempts par défaut de runWithSerializableRetry
+
+    runSpy.mockRestore();
   });
 
   it("confirm works for a product that does not track stock (no movement created)", async () => {

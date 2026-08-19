@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { Prisma, PurchaseStatus } from "@prisma/client";
 import { CreatePurchaseInput, ListPurchasesQuery } from "@erp/validation";
 import { TenantScopedPrismaService } from "../tenant/tenant-scoped-prisma.service";
+import { runWithSerializableRetry } from "../common/serializable-retry";
 import { StockRepository } from "../stock/stock.repository";
 
 // Vues calculées, comme SaleView/SaleLineView dans sales.repository.ts.
@@ -214,36 +215,40 @@ export class PurchasesRepository {
   // échouer pour cause de stock insuffisant (un mouvement IN ne fait
   // qu'augmenter le solde) — la transaction Serializable reste nécessaire
   // pour la cohérence concurrente du solde lu par applyMovement, pas pour
-  // une garde métier.
+  // une garde métier. runWithSerializableRetry absorbe les P2034 transitoires
+  // (même raisonnement que StockRepository.createMovement) avant l'échec
+  // persistant en 409.
   async confirm(enterpriseId: string, purchaseId: string): Promise<PurchaseView> {
     try {
-      return await this.tenantPrisma.run(
-        async (tx) => {
-          const purchase = await this.getPurchaseOrThrow(tx, enterpriseId, purchaseId);
-          if (purchase.status !== "DRAFT") {
-            throw new ConflictException("Seul un achat en brouillon peut être confirmé");
-          }
-
-          for (const line of purchase.lines) {
-            if (line.product.trackStock) {
-              await this.stockRepository.applyMovement(tx, enterpriseId, {
-                productId: line.productId,
-                type: "IN",
-                quantity: line.quantity,
-                note: `Achat ${purchase.id}`,
-              });
+      return await runWithSerializableRetry(() =>
+        this.tenantPrisma.run(
+          async (tx) => {
+            const purchase = await this.getPurchaseOrThrow(tx, enterpriseId, purchaseId);
+            if (purchase.status !== "DRAFT") {
+              throw new ConflictException("Seul un achat en brouillon peut être confirmé");
             }
-          }
 
-          const confirmed = await tx.purchase.update({
-            where: { id: purchaseId },
-            data: { status: "CONFIRMED", confirmedAt: new Date() },
-            include: { lines: { include: { product: true } }, supplier: true },
-          });
+            for (const line of purchase.lines) {
+              if (line.product.trackStock) {
+                await this.stockRepository.applyMovement(tx, enterpriseId, {
+                  productId: line.productId,
+                  type: "IN",
+                  quantity: line.quantity,
+                  note: `Achat ${purchase.id}`,
+                });
+              }
+            }
 
-          return this.toPurchaseView(confirmed);
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+            const confirmed = await tx.purchase.update({
+              where: { id: purchaseId },
+              data: { status: "CONFIRMED", confirmedAt: new Date() },
+              include: { lines: { include: { product: true } }, supplier: true },
+            });
+
+            return this.toPurchaseView(confirmed);
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        ),
       );
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
