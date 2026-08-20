@@ -959,7 +959,30 @@ et écrit sur stdout (BIL-11).
   webhook ; borner le cache (LRU) ; requalifier le libellé du test ou le doubler d'un
   test exécuté avec le TTL de production.
 - **Priorité** : P3
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-20) — deux mécanismes indépendants ajoutés à
+  `EntitlementsService` : `invalidate(tenantId)`, appelé par
+  `SubscriptionsService.changePlan` et `PaymentWebhookService` à chaque
+  changement de plan/statut effectif (élimine la fenêtre de dérive du TTL,
+  jusque-là purement passive) ; éviction LRU dans `store()`, bornée par la
+  nouvelle constante `ENTITLEMENTS_CACHE_MAX_ENTRIES` (`env.ts`, défaut 1000)
+  — une entrée expirée ou un tenant qui ne revient jamais ne reste plus en
+  mémoire indéfiniment. Le test `subscriptions.controller.integration.spec.ts`
+  cité par ce finding (« takes effect immediately... ») a été corrigé pour
+  fixer explicitement `ENTITLEMENTS_CACHE_TTL_MS` à la valeur par défaut de
+  production (5000 ms) le temps du test, prouvant désormais réellement
+  `invalidate()` plutôt qu'un TTL par ailleurs désactivé sous Jest — il ne
+  passait auparavant que par accident. **Écart assumé** :
+  `JwtAuthGuard.statusCache` partage exactement la même faiblesse
+  structurelle (Map non bornée, même patron TTL) mais reste explicitement
+  hors périmètre de ce correctif — traitement séparé si nécessaire, pour ne
+  pas transformer un correctif ciblé en refactoring transversal. De même,
+  `SubscriptionLifecycleService` (BIL-03, transitions `TRIAL→EXPIRED` et
+  `PAST_DUE→SUSPENDED` par cron) modifie aussi `Subscription.status` sans
+  appeler `invalidate()` — non traité ici, le finding ne nommait que
+  `changePlan` et le webhook. Tests : TTL simulé en valeurs de production
+  (reste en cache dans la fenêtre, se ré-résout après, sans attente réelle —
+  `Date.now()` mocké) ; `invalidate()` direct et no-op sur tenant absent ;
+  comportement normal sous la borne mémoire ; éviction LRU au-delà.
 
 ### BIL-18
 

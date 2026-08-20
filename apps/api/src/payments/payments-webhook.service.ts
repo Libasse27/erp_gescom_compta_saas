@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import { PaymentProvider, Subscription, SubscriptionStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditLogService } from "../common/audit/audit-log.service";
+import { EntitlementsService } from "../entitlements/entitlements.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { env } from "../config/env";
 import {
@@ -40,6 +41,7 @@ export class PaymentWebhookService {
     private readonly invoiceGeneration: InvoiceGenerationService,
     private readonly notifications: NotificationsService,
     private readonly auditLog: AuditLogService,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
   async handle(
@@ -283,6 +285,12 @@ export class PaymentWebhookService {
       // notification) — ne pas dupliquer ces effets de bord.
       return { outcome: "ignored_already_processed", paymentId: payment.id };
     }
+
+    // Corrige BIL-17 (docs/audit/BILLING-AUDIT.md) : le statut de
+    // l'abonnement peut avoir changé (ACTIVE/PAST_DUE) dans la transaction
+    // ci-dessus — sans ceci, EntitlementsService pouvait continuer à servir
+    // l'ancien statut jusqu'à entitlementsCacheTtlMs (5 s en production).
+    this.entitlements.invalidate(payment.enterpriseId);
 
     await this.auditLog.record({
       enterpriseId: payment.enterpriseId,

@@ -1,6 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { SubscriptionStatus } from "@prisma/client";
 import { AuditLogService } from "../common/audit/audit-log.service";
+import { EntitlementsService } from "../entitlements/entitlements.service";
 import { RequestMetadata } from "../auth/auth.service";
 import { CrossTenantRepository } from "../tenant/cross-tenant.repository";
 
@@ -28,6 +29,7 @@ export class SubscriptionsService {
   constructor(
     private readonly crossTenant: CrossTenantRepository,
     private readonly auditLog: AuditLogService,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
   async changePlan(
@@ -71,6 +73,13 @@ export class SubscriptionsService {
       reason,
       triggeredByUserId: actorUserId,
     });
+
+    // Corrige BIL-17 (docs/audit/BILLING-AUDIT.md) : sans ceci, la requête
+    // suivante pouvait encore voir l'ancien plan jusqu'à
+    // entitlementsCacheTtlMs (5 s en production) — le changement de plan
+    // n'était donc pas réellement immédiat malgré ce que documente déjà le
+    // test d'intégration de ce contrôleur.
+    this.entitlements.invalidate(enterpriseId);
 
     await this.auditLog.record({
       userId: actorUserId,

@@ -240,62 +240,77 @@ describe("SubscriptionsController — changement de plan Super Admin (integratio
     expect(events).toHaveLength(0);
   });
 
-  it("takes effect immediately for entitlements checks, without redeploying anything", async () => {
-    const superAdminToken = await createSuperAdminToken();
-    const { enterprise, adminId, accessToken } = await createEnterpriseAdminToken();
+  // BIL-17 (docs/audit/BILLING-AUDIT.md) : ce test ne prouvait auparavant
+  // que le comportement en environnement de test (ENTITLEMENTS_CACHE_TTL_MS
+  // forcé à 0, voir test/setup-env.js) — chaque appel se ré-résolvait de
+  // toute façon, TTL positif ou non. Le TTL est ici explicitement mis à la
+  // valeur par défaut de production (5000 ms) pour la portion du test qui
+  // change de plan, afin de démontrer l'invalidation active de
+  // SubscriptionsService.changePlan (EntitlementsService.invalidate) plutôt
+  // qu'un TTL par ailleurs désactivé.
+  it("takes effect immediately for entitlements checks, without redeploying anything, even with a production-like TTL", async () => {
+    const previousTtl = process.env.ENTITLEMENTS_CACHE_TTL_MS;
+    process.env.ENTITLEMENTS_CACHE_TTL_MS = "5000";
+    try {
+      const superAdminToken = await createSuperAdminToken();
+      const { enterprise, adminId, accessToken } = await createEnterpriseAdminToken();
 
-    const role = await prisma.role.create({ data: { enterpriseId: enterprise.id, name: "ADMIN" } });
-    const permission = await prisma.permission.upsert({
-      where: { key: "users.manage" },
-      create: { key: "users.manage" },
-      update: {},
-    });
-    await prisma.rolePermission.create({ data: { roleId: role.id, permissionId: permission.id } });
-    await prisma.userRole.create({ data: { userId: adminId, roleId: role.id } });
+      const role = await prisma.role.create({ data: { enterpriseId: enterprise.id, name: "ADMIN" } });
+      const permission = await prisma.permission.upsert({
+        where: { key: "users.manage" },
+        create: { key: "users.manage" },
+        update: {},
+      });
+      await prisma.rolePermission.create({ data: { roleId: role.id, permissionId: permission.id } });
+      await prisma.userRole.create({ data: { userId: adminId, roleId: role.id } });
 
-    const roomyPlan = await createPlan(`ROOMY_${randomUUID()}`);
-    await subscribeEnterprise(enterprise.id, roomyPlan.id);
+      const roomyPlan = await createPlan(`ROOMY_${randomUUID()}`);
+      await subscribeEnterprise(enterprise.id, roomyPlan.id);
 
-    // Sur ce plan sans limite "users", l'invitation passe.
-    await request(app.getHttpServer())
-      .post("/users/invite")
-      .set("Authorization", `Bearer ${accessToken}`)
-      .send({ email: `invitee-${randomUUID()}@test.local`, firstName: "In", lastName: "Vitee", roleId: role.id })
-      .expect(201);
+      // Sur ce plan sans limite "users", l'invitation passe.
+      await request(app.getHttpServer())
+        .post("/users/invite")
+        .set("Authorization", `Bearer ${accessToken}`)
+        .send({ email: `invitee-${randomUUID()}@test.local`, firstName: "In", lastName: "Vitee", roleId: role.id })
+        .expect(201);
 
-    const limit = await prisma.limit.upsert({
-      where: { key: "users" },
-      create: { key: "users", label: "Utilisateurs" },
-      update: {},
-    });
-    const tightPlan = await prisma.plan.create({
-      data: {
-        code: `TIGHT_${randomUUID()}`,
-        name: "Tight",
-        priceMonthly: 5_000,
-        planLimits: { create: { limitId: limit.id, value: 1 } },
-      },
-    });
-    createdPlanIds.push(tightPlan.id);
+      const limit = await prisma.limit.upsert({
+        where: { key: "users" },
+        create: { key: "users", label: "Utilisateurs" },
+        update: {},
+      });
+      const tightPlan = await prisma.plan.create({
+        data: {
+          code: `TIGHT_${randomUUID()}`,
+          name: "Tight",
+          priceMonthly: 5_000,
+          planLimits: { create: { limitId: limit.id, value: 1 } },
+        },
+      });
+      createdPlanIds.push(tightPlan.id);
 
-    await request(app.getHttpServer())
-      .patch(`/admin/enterprises/${enterprise.id}/subscription`)
-      .set("Authorization", `Bearer ${superAdminToken}`)
-      .send({ planId: tightPlan.id })
-      .expect(200);
+      await request(app.getHttpServer())
+        .patch(`/admin/enterprises/${enterprise.id}/subscription`)
+        .set("Authorization", `Bearer ${superAdminToken}`)
+        .send({ planId: tightPlan.id })
+        .expect(200);
 
-    // Sans redéploiement ni relogin : la toute prochaine requête voit déjà
-    // le nouveau plan (2 utilisateurs existants >= limite de 1).
-    await request(app.getHttpServer())
-      .post("/users/invite")
-      .set("Authorization", `Bearer ${accessToken}`)
-      .send({ email: `invitee-${randomUUID()}@test.local`, firstName: "In", lastName: "Vitee", roleId: role.id })
-      .expect(403);
+      // Sans redéploiement ni relogin : la toute prochaine requête voit déjà
+      // le nouveau plan (2 utilisateurs existants >= limite de 1) — même
+      // avec un TTL de production actif, grâce à invalidate() (BIL-17).
+      await request(app.getHttpServer())
+        .post("/users/invite")
+        .set("Authorization", `Bearer ${accessToken}`)
+        .send({ email: `invitee-${randomUUID()}@test.local`, firstName: "In", lastName: "Vitee", roleId: role.id })
+        .expect(403);
 
-    // Downgrade avec effectif au-delà du nouveau quota : les 2 utilisateurs
-    // existants ne sont jamais supprimés (pas de perte silencieuse), seule
-    // la création de nouveaux comptes est bloquée.
-    const remainingUsers = await prisma.user.count({ where: { enterpriseId: enterprise.id } });
-    expect(remainingUsers).toBe(2);
+      // Downgrade avec effectif au-delà du nouveau quota : les 2 utilisateurs
+      // existants ne sont jamais supprimés (pas de perte silencieuse), seule
+      // la création de nouveaux comptes est bloquée.
+      const remainingUsers = await prisma.user.count({ where: { enterpriseId: enterprise.id } });
+      expect(remainingUsers).toBe(2);
+    } finally {
+      process.env.ENTITLEMENTS_CACHE_TTL_MS = previousTtl;
+    }
   });
 });
