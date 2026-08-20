@@ -917,7 +917,23 @@ et écrit sur stdout (BIL-11).
 - **Solution** : ajouter `.strict()` sur les deux schémas ; contraindre `currency` à
   un `z.enum(["XOF"])` tant que seule cette devise est supportée.
 - **Priorité** : P3
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-20) — `.strict()` appliqué aux deux schémas
+  (`createPendingPaymentSchema`, `paymentWebhookEventSchema`) ; `currency` de
+  `paymentWebhookEventSchema` resserré à `z.enum(["XOF"])`. Analyse faite
+  avant implémentation : `ZodValidationPipe` ne transmettait déjà au service
+  que les champs validés (BIL-05 neutralisait déjà tout `amount`/`currency`
+  forgé côté client, indépendamment du mode strict) — `.strict()` sur
+  `createPendingPaymentSchema` change donc le contrat HTTP (clé en trop → 400
+  au lieu de 201 silencieux), sans renforcer une garantie de sécurité déjà
+  acquise. Décision produit : appliquer `.strict()` aux deux schémas quand
+  même, pour la cohérence des frontières API d'un ERP financier, plutôt que
+  de le réserver au seul schéma webhook. Le test
+  `payments-bootstrap.integration.spec.ts` qui démontrait explicitement le
+  rejeu d'un `amount`/`currency` forgé comme *ignoré* (201) a été réécrit en
+  deux temps : un cas payload propre → 201 (couverture BIL-05 préservée) et
+  un nouveau cas payload avec clés en trop → 400 (couverture BIL-16).
+  Tests ajoutés : clé inconnue dans le webhook → 400, devise ≠ XOF → 400, clé
+  inconnue dans `createPendingPaymentSchema` → 400.
 
 ### BIL-17
 

@@ -92,11 +92,30 @@ describe("PaymentsBootstrapController (integration) — BIL-05", () => {
     return { enterprise, plan, subscription };
   }
 
-  it("ignores a forged amount/currency in the request body and derives the amount from the plan's monthly price", async () => {
+  it("derives the amount from the plan's monthly price", async () => {
     const superAdminToken = await createSuperAdminToken();
     const { enterprise } = await createEnterpriseWithSubscription(7_500, 75_000);
 
     const res = await request(app.getHttpServer())
+      .post(`/admin/enterprises/${enterprise.id}/payments`)
+      .set("Authorization", `Bearer ${superAdminToken}`)
+      .send({ provider: "WAVE", providerReference: `ref-${randomUUID()}`, billingPeriod: "MONTHLY" })
+      .expect(201);
+
+    const payment = await prisma.payment.findUniqueOrThrow({ where: { id: res.body.paymentId } });
+    expect(payment.amount).toBe(7_500);
+    expect(payment.currency).toBe("XOF");
+  });
+
+  // BIL-16 (docs/audit/BILLING-AUDIT.md) : createPendingPaymentSchema est
+  // désormais .strict() — un forgeage d'amount/currency n'est plus
+  // silencieusement ignoré (BIL-05 le neutralisait déjà côté service, avant
+  // même ce changement), il est rejeté au niveau de la validation.
+  it("rejects a request body with unknown keys (amount/currency) with 400", async () => {
+    const superAdminToken = await createSuperAdminToken();
+    const { enterprise } = await createEnterpriseWithSubscription(7_500, 75_000);
+
+    await request(app.getHttpServer())
       .post(`/admin/enterprises/${enterprise.id}/payments`)
       .set("Authorization", `Bearer ${superAdminToken}`)
       .send({
@@ -106,11 +125,7 @@ describe("PaymentsBootstrapController (integration) — BIL-05", () => {
         amount: 1,
         currency: "EUR",
       })
-      .expect(201);
-
-    const payment = await prisma.payment.findUniqueOrThrow({ where: { id: res.body.paymentId } });
-    expect(payment.amount).toBe(7_500);
-    expect(payment.currency).toBe("XOF");
+      .expect(400);
   });
 
   it("derives the amount from the plan's yearly price when billingPeriod is YEARLY", async () => {

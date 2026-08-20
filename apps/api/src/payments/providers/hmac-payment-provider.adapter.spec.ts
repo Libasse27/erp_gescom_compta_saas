@@ -117,5 +117,25 @@ describe("HmacPaymentProviderAdapter", () => {
         BadRequestException,
       );
     });
+
+    // BIL-16 (docs/audit/BILLING-AUDIT.md) : paymentWebhookEventSchema est
+    // désormais .strict() — une dérive de schéma côté fournisseur (champ
+    // renommé, amount_net ajouté en plus d'amount) n'est plus silencieusement
+    // ignorée, elle est rejetée.
+    it("rejects a payload with an unknown key", () => {
+      const body = JSON.stringify({
+        reference: "ref-4",
+        status: "succeeded",
+        amount: 5_000,
+        currency: "XOF",
+        amount_net: 4_800,
+      });
+      expect(() => adapter.parseEvent(Buffer.from(body))).toThrow(BadRequestException);
+    });
+
+    it("rejects a currency other than XOF", () => {
+      const body = JSON.stringify({ reference: "ref-5", status: "succeeded", amount: 5_000, currency: "EUR" });
+      expect(() => adapter.parseEvent(Buffer.from(body))).toThrow(BadRequestException);
+    });
   });
 });
