@@ -30,8 +30,44 @@ export class CrossTenantRepository {
     return this.prisma.plan.findUnique({ where: { id: planId } });
   }
 
-  updateSubscriptionPlan(subscriptionId: string, planId: string): Promise<Subscription> {
-    return this.prisma.subscription.update({ where: { id: subscriptionId }, data: { planId } });
+  // Corrige BIL-13 (docs/audit/BILLING-AUDIT.md) : la mise à jour du plan et
+  // l'écriture de l'événement d'historique doivent réussir ou échouer
+  // ensemble — un abonnement dont le plan a changé sans trace dans
+  // SubscriptionEvent viole l'objectif d'historique immuable de facturation
+  // (OHADA). Le statut n'est pas affecté par un changement de plan
+  // (fromStatus === toStatus dans l'événement) : ce n'est pas de la logique
+  // métier, seulement la frontière transactionnelle des deux écritures que
+  // SubscriptionsService.changePlan doit composer.
+  changeSubscriptionPlan(
+    subscriptionId: string,
+    newPlanId: string,
+    event: {
+      fromStatus: SubscriptionStatus;
+      fromPlanId: string;
+      reason?: string;
+      triggeredByUserId?: string;
+    },
+  ): Promise<Subscription> {
+    return this.prisma.$transaction(async (tx) => {
+      const subscription = await tx.subscription.update({
+        where: { id: subscriptionId },
+        data: { planId: newPlanId },
+      });
+
+      await tx.subscriptionEvent.create({
+        data: {
+          subscriptionId,
+          fromStatus: event.fromStatus,
+          toStatus: event.fromStatus,
+          fromPlanId: event.fromPlanId,
+          toPlanId: newPlanId,
+          reason: event.reason,
+          triggeredByUserId: event.triggeredByUserId,
+        },
+      });
+
+      return subscription;
+    });
   }
 
   createSubscriptionEvent(data: {

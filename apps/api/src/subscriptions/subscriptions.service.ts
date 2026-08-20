@@ -1,7 +1,22 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { SubscriptionStatus } from "@prisma/client";
 import { AuditLogService } from "../common/audit/audit-log.service";
 import { RequestMetadata } from "../auth/auth.service";
 import { CrossTenantRepository } from "../tenant/cross-tenant.repository";
+
+// Corrige BIL-13 (docs/audit/BILLING-AUDIT.md) : CANCELLED et EXPIRED sont
+// des états terminaux (subscription-state-machine.ts, ALLOWED_TRANSITIONS
+// vides pour ces deux statuts) — un abonnement qui y est ne doit plus jamais
+// être modifié. Garde définie ici plutôt que réutiliser
+// assertSubscriptionTransition : un changement de plan ne fait pas varier le
+// statut (fromStatus === toStatus dans l'événement), ce n'est donc pas une
+// transition au sens de la state machine, qui rejetterait à tort tout
+// changement de plan (aucun statut n'est listé comme transitionnant vers
+// lui-même).
+const TERMINAL_SUBSCRIPTION_STATUSES: readonly SubscriptionStatus[] = [
+  SubscriptionStatus.CANCELLED,
+  SubscriptionStatus.EXPIRED,
+];
 
 // Action plateforme du Super Admin (docs/PROMPT-MAITRE-SAAS.md Phase 4,
 // critère "changer un plan côté Super Admin se répercute sans
@@ -28,6 +43,12 @@ export class SubscriptionsService {
       throw new NotFoundException("Aucun abonnement actif pour cette entreprise");
     }
 
+    if (TERMINAL_SUBSCRIPTION_STATUSES.includes(subscription.status)) {
+      throw new ConflictException(
+        `Impossible de changer de forfait : l'abonnement est ${subscription.status}`,
+      );
+    }
+
     const newPlan = await this.crossTenant.findPlan(newPlanId);
     if (!newPlan) {
       throw new NotFoundException("Forfait introuvable");
@@ -37,17 +58,16 @@ export class SubscriptionsService {
       throw new ConflictException("L'entreprise est déjà sur ce forfait");
     }
 
-    await this.crossTenant.updateSubscriptionPlan(subscription.id, newPlanId);
-
     // Historique immuable de la facturation passée (docs/PROMPT-MAITRE-SAAS.md
     // Phase 1) : le statut de l'abonnement n'est pas affecté par un simple
-    // changement de plan, seul le plan change.
-    await this.crossTenant.createSubscriptionEvent({
-      subscriptionId: subscription.id,
+    // changement de plan, seul le plan change. Mise à jour du plan +
+    // écriture de l'événement dans une seule transaction (BIL-13) : jamais
+    // de plan changé sans trace dans l'historique. Proration/facturation au
+    // changement de plan explicitement hors périmètre (docs/audit/BILLING-AUDIT.md
+    // BIL-13, décision produit/finance non tranchée).
+    await this.crossTenant.changeSubscriptionPlan(subscription.id, newPlanId, {
       fromStatus: subscription.status,
-      toStatus: subscription.status,
       fromPlanId: subscription.planId,
-      toPlanId: newPlanId,
       reason,
       triggeredByUserId: actorUserId,
     });

@@ -810,7 +810,23 @@ et écrit sur stdout (BIL-11).
   ou la documenter comme non couverte. Tests : « changement refusé sur abonnement
   annulé », « aucun changement sans événement d'historique ».
 - **Priorité** : P2
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-20) — `SubscriptionsService.changePlan` refuse
+  désormais (409) tout changement sur un abonnement `CANCELLED`/`EXPIRED` ;
+  garde placée dans le service (pas dans `subscription-state-machine.ts`) car
+  un changement de plan ne fait pas varier le statut
+  (`fromStatus === toStatus`) — ce n'est pas une transition au sens de la
+  state machine, qui rejetterait à tort tout changement de plan si on lui
+  demandait `assertSubscriptionTransition(status, status)`.
+  `CrossTenantRepository.changeSubscriptionPlan` encapsule désormais la mise
+  à jour du plan et la création du `SubscriptionEvent` dans une seule
+  transaction Prisma (`updateSubscriptionPlan` supprimée, devenue son seul
+  appelant). **Écart assumé** : aucune proration/facturation n'est
+  déclenchée par un changement de plan — décision produit/finance non
+  tranchée (montant, date d'effet, remboursement au downgrade), restant
+  explicitement hors périmètre de ce correctif. Tests : rejet 409 sur
+  `CANCELLED` et `EXPIRED` (aucune écriture, aucun `SubscriptionEvent`),
+  rollback des deux écritures si la transaction échoue (contrainte de clé
+  étrangère sur `planId`), non-régression des 5 tests existants.
 
 ### BIL-14
 

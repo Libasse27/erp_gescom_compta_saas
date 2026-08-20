@@ -3,10 +3,12 @@ import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import { authenticator } from "otplib";
+import { SubscriptionStatus } from "@prisma/client";
 import { AppModule } from "../app.module";
 import { RawDbClient } from "../prisma/raw-db-client";
 import { PasswordService } from "../auth/password.service";
 import { MfaService } from "../auth/mfa.service";
+import { CrossTenantRepository } from "../tenant/cross-tenant.repository";
 
 // Phase 4, critère "changer un plan côté Super Admin se répercute sans
 // redéploiement" (docs/PROMPT-MAITRE-SAAS.md) : PATCH /admin/enterprises/:id/subscription,
@@ -109,9 +111,13 @@ describe("SubscriptionsController — changement de plan Super Admin (integratio
     return plan;
   }
 
-  async function subscribeEnterprise(enterpriseId: string, planId: string) {
+  async function subscribeEnterprise(
+    enterpriseId: string,
+    planId: string,
+    status: SubscriptionStatus = "ACTIVE",
+  ) {
     const subscription = await prisma.subscription.create({
-      data: { enterpriseId, planId, status: "ACTIVE", startDate: new Date() },
+      data: { enterpriseId, planId, status, startDate: new Date() },
     });
     await prisma.enterprise.update({ where: { id: enterpriseId }, data: { currentSubscriptionId: subscription.id } });
     return subscription;
@@ -181,6 +187,57 @@ describe("SubscriptionsController — changement de plan Super Admin (integratio
       .set("Authorization", `Bearer ${superAdminToken}`)
       .send({ planId: plan.id })
       .expect(409);
+  });
+
+  // BIL-13 (docs/audit/BILLING-AUDIT.md) : CANCELLED et EXPIRED sont des
+  // états terminaux (subscription-state-machine.ts) — plus aucune écriture
+  // n'y est autorisée, y compris un changement de plan.
+  it.each(["CANCELLED", "EXPIRED"] as const)(
+    "rejects the plan change and makes no change when the subscription is %s",
+    async (status) => {
+      const superAdminToken = await createSuperAdminToken();
+      const { enterprise } = await createEnterpriseAdminToken();
+      const oldPlan = await createPlan(`TERMINAL_OLD_${randomUUID()}`);
+      const newPlan = await createPlan(`TERMINAL_NEW_${randomUUID()}`);
+      const subscription = await subscribeEnterprise(enterprise.id, oldPlan.id, status);
+
+      await request(app.getHttpServer())
+        .patch(`/admin/enterprises/${enterprise.id}/subscription`)
+        .set("Authorization", `Bearer ${superAdminToken}`)
+        .send({ planId: newPlan.id })
+        .expect(409);
+
+      const unchanged = await prisma.subscription.findUniqueOrThrow({ where: { id: subscription.id } });
+      expect(unchanged.planId).toBe(oldPlan.id);
+
+      const events = await prisma.subscriptionEvent.findMany({ where: { subscriptionId: subscription.id } });
+      expect(events).toHaveLength(0);
+    },
+  );
+
+  // BIL-13 : les deux écritures (Subscription.planId, SubscriptionEvent)
+  // doivent réussir ou échouer ensemble. Un planId inexistant fait échouer
+  // tx.subscription.update sur la contrainte de clé étrangère — si la
+  // transaction fonctionne, aucune des deux écritures ne doit être visible.
+  it("rolls back both writes together when the transaction fails (atomicity)", async () => {
+    const { enterprise } = await createEnterpriseAdminToken();
+    const plan = await createPlan(`ATOMIC_${randomUUID()}`);
+    const subscription = await subscribeEnterprise(enterprise.id, plan.id);
+    const crossTenant = app.get(CrossTenantRepository);
+
+    await expect(
+      crossTenant.changeSubscriptionPlan(subscription.id, randomUUID(), {
+        fromStatus: SubscriptionStatus.ACTIVE,
+        fromPlanId: plan.id,
+        reason: "atomicity test",
+      }),
+    ).rejects.toThrow();
+
+    const unchanged = await prisma.subscription.findUniqueOrThrow({ where: { id: subscription.id } });
+    expect(unchanged.planId).toBe(plan.id);
+
+    const events = await prisma.subscriptionEvent.findMany({ where: { subscriptionId: subscription.id } });
+    expect(events).toHaveLength(0);
   });
 
   it("takes effect immediately for entitlements checks, without redeploying anything", async () => {
