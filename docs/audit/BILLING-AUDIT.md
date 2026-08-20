@@ -851,7 +851,20 @@ et écrit sur stdout (BIL-11).
   basse) sur `ProvisioningController`, et ajouter un test de non-régression qui vérifie
   que **toutes** les routes du préfixe `auth` portent bien la limite stricte.
 - **Priorité** : P2
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-20) — `ProvisioningController` porte
+  désormais `@Throttle(AUTH_RATE_LIMIT)`, même limite que `AuthController`
+  (10/min, pas de limite dédiée — décision produit à réévaluer plus tard si
+  les métriques le justifient). `apps/api/src/common/auth-throttling.spec.ts`
+  ajouté : découvre dynamiquement, à partir du système de fichiers, tous les
+  `*.controller.ts` dont `@Controller()` porte le préfixe `auth`, et vérifie
+  pour chacun la présence de `@Throttle(AUTH_RATE_LIMIT)` — un futur
+  contrôleur `@Controller("auth/xxx")` sans throttling ferait donc échouer
+  la CI automatiquement, sans liste manuelle à maintenir. Comparaison faite
+  via une classe témoin décorée par le `Throttle` public du package (jamais
+  de clé de métadonnée interne à `@nestjs/throttler` recopiée en dur, ce
+  package ne les exporte pas). Test explicite dédié à
+  `ProvisioningController` en complément. Vérifié : le test échoue bien si
+  le décorateur est retiré (non vacueusement vert).
 
 ### BIL-15
 
