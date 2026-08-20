@@ -883,7 +883,24 @@ et écrit sur stdout (BIL-11).
   liste blanche d'IP fournisseur lorsqu'elle sera connue. Toujours répondre 200 sur un
   événement déjà traité, et documenter le comportement en cas de 429.
 - **Priorité** : P3
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-20) — `PaymentsWebhookController` porte
+  désormais `@Throttle(WEBHOOK_RATE_LIMIT)`, 300 req/min/IP (nouvelle
+  constante dans `common/rate-limit.ts`, calculée par `computeRateLimits`
+  comme les autres limites, désactivée sous `NODE_ENV=test`) — même
+  mécanisme d'override du throttler `default` que BIL-14, aucun throttler
+  nommé supplémentaire, aucun changement dans `app.module.ts`. `Retry-After`
+  vérifié directement dans les sources installées de `@nestjs/throttler`
+  (6.5.0) : émis nativement sur tout 429, pas une fonctionnalité à activer
+  séparément — documenté dans l'ADR 0010 (mise à jour 2026-08-20). Le point
+  « toujours répondre 200 sur un événement déjà traité » de la solution
+  d'origine était déjà satisfait par BIL-01/BIL-07/BIL-09, vérifié dans le
+  code actuel de `PaymentWebhookService.handle`, rien à changer ici.
+  **Écart assumé** : aucune liste blanche d'IP fournisseur — hors périmètre
+  tant qu'aucun fournisseur réel n'est intégré, documenté dans l'ADR 0010.
+  Tests : `common/webhook-throttling.spec.ts` (le contrôleur porte bien la
+  limite dédiée, comparaison via classe témoin, vérifié qu'il échoue sans le
+  décorateur) ; `common/rate-limit.spec.ts` complété (webhooks > global en
+  valeurs de production).
 
 ### BIL-16
 

@@ -61,6 +61,35 @@ fraîcheur limite la fenêtre de rejeu à quelques minutes, mais ne l'élimine
 pas — un rejeu **dans** la fenêtre de tolérance reste accepté comme un
 événement légitime, faute d'un magasin d'identifiants d'événements déjà vus.
 
+## Mise à jour — 2026-08-20 (BIL-15, docs/audit/BILLING-AUDIT.md)
+`PaymentsWebhookController` (`/webhooks/payments/:provider`) portait jusqu'ici
+la seule limite globale de l'API (100 req/min/IP) faute de décorateur dédié.
+Ce point d'entrée reçoit du trafic serveur-à-serveur (livraison en rafale,
+rejeu d'un lot après une panne réseau côté fournisseur), pas du trafic
+utilisateur — la limite globale pouvait donc bloquer un fournisseur légitime.
+Le contrôleur porte désormais `@Throttle(WEBHOOK_RATE_LIMIT)`, 300 req/min/IP
+(`apps/api/src/common/rate-limit.ts`), même mécanisme d'override que
+`AuthController`/`ProvisioningController` (BIL-14) — aucun throttler nommé
+supplémentaire, aucun changement dans `app.module.ts`.
+
+**Comportement en cas de 429** : vérifié directement dans les sources
+installées de `@nestjs/throttler` (version résolue 6.5.0, réponse standard du
+package, aucun code applicatif ajouté ici). `ThrottlerStorageService.increment`
+marque une requête `isBlocked` dès que le nombre de requêtes dans la fenêtre
+dépasse la limite — ce n'est pas une fonctionnalité "block duration" à activer
+séparément, c'est le chemin normal du 429. `ThrottlerGuard.handleRequest` pose
+alors l'en-tête `Retry-After` (secondes avant réinitialisation) avant de lever
+l'exception, tant que `setHeaders` n'est pas désactivé (vrai par défaut, non
+désactivé dans ce projet). Pour le throttler `default` (celui utilisé ici),
+l'en-tête est exactement `Retry-After`, sans suffixe — un throttler nommé
+porterait `Retry-After-<nom>`.
+
+**Liste blanche d'IP fournisseur** : toujours hors périmètre. Aucun fournisseur
+réel n'est intégré (voir ci-dessus, adaptateur HMAC générique) — impossible de
+whitelister des plages IP qui n'existent pas encore côté plateforme. À traiter
+au moment de l'intégration réelle d'un fournisseur, quand ses plages IP
+officielles seront connues.
+
 ## Conséquences
 - Aucun webhook de paiement réel (Wave, Orange Money, Stripe...) ne peut
   être accepté aujourd'hui : ce mécanisme n'est vérifié qu'avec des secrets
