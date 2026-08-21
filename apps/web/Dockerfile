@@ -3,9 +3,9 @@
 # NEXT_PUBLIC_API_URL est inlinée au build (variable NEXT_PUBLIC_*), donc
 # fournie en --build-arg, pas seulement en variable d'environnement runtime.
 
-FROM node:20-alpine AS base
-# Paquets Alpine (libssl3/libcrypto3...) : la version figée dans l'image
-# node:20-alpine publiée peut être en retard sur les correctifs de sécurité
+FROM node:24-alpine AS base
+# Paquets Alpine (libssl3/libcrypto3...) : la version figée dans une image
+# Node Alpine publiée peut être en retard sur les correctifs de sécurité
 # du dépôt Alpine — CVE-2026-45447 (OpenSSL, use-after-free dans
 # PKCS7_verify) détectée par Trivy en CI sur erp-web:ci, qui ne touchait
 # jamais apk contrairement à apps/api/Dockerfile (dont le `apk add`
@@ -15,14 +15,18 @@ FROM node:20-alpine AS base
 RUN apk upgrade --no-cache
 # npm embarque ses propres dépendances internes (tar, glob, minimatch,
 # cross-spawn, brace-expansion, ip-address, sigstore, picomatch) — la
-# version fournie par node:20-alpine embarquait des CVE connues (dont une
-# CRITICAL sur tar, CVE-2026-59873) détectées par le scan Trivy de l'image
-# en CI (P-01, voir apps/api/Dockerfile pour le contexte complet). Jamais
-# invoquées par notre code, mais présentes dans l'image scannée. Version
-# épinglée (pas `npm@latest`, passé en npm 12 qui exige Node >=22 —
-# incompatible avec node:20-alpine, fait échouer ce `RUN`, vécu en
-# vérifiant ce correctif). 10.9.9 = dernière version 10.x, compatible
-# Node >=20.5.0, tar/glob/minimatch déjà corrigés en interne.
+# version fournie par les images Node Alpine embarquait des CVE connues
+# (dont une CRITICAL sur tar, CVE-2026-59873) détectées par le scan Trivy de
+# l'image en CI (P-01, voir apps/api/Dockerfile pour le contexte complet).
+# Jamais invoquées par notre code, mais présentes dans l'image scannée.
+# Version épinglée (pas `npm@latest`), volontairement conservée à 10.9.9
+# pour la stabilité/reproductibilité du build : tar/glob/minimatch y sont
+# déjà corrigés en interne, compatible Node >=20.5.0. Note historique : ce
+# pin évitait aussi, à l'origine, `npm@latest` (passé en npm 12, exigeant
+# Node >=22) sur la base node:20-alpine alors utilisée (vécu en vérifiant ce
+# correctif) — CI-02 (passage à node:24-alpine) lève cette contrainte
+# précise, mais ne change pas ce choix : aucune mise à niveau de package
+# manager ici, périmètre strictement limité à la migration du runtime.
 RUN npm install -g npm@10.9.9
 RUN corepack enable
 RUN npm install -g turbo@2.1.3
