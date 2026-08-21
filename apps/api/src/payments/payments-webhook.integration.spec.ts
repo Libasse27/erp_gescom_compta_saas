@@ -132,7 +132,12 @@ describe("PaymentsWebhookController (integration)", () => {
     return { enterprise, subscription, user };
   }
 
-  async function createPendingPayment(enterpriseId: string, subscriptionId: string, amount = 5_000) {
+  async function createPendingPayment(
+    enterpriseId: string,
+    subscriptionId: string,
+    amount = 5_000,
+    expiresAt?: Date,
+  ) {
     const providerReference = `ref-${randomUUID()}`;
     const payment = await prisma.payment.create({
       data: {
@@ -143,6 +148,7 @@ describe("PaymentsWebhookController (integration)", () => {
         amount,
         currency: "XOF",
         status: "PENDING",
+        expiresAt,
       },
     });
     return { paymentId: payment.id, providerReference };
@@ -504,6 +510,56 @@ describe("PaymentsWebhookController (integration)", () => {
     });
     expect(rejections).toHaveLength(1);
     expect(rejections[0]!.metadata).toMatchObject({ httpStatus: 409, reason: "payment_without_subscription" });
+  });
+
+  // BIL-19 (docs/audit/BILLING-AUDIT.md) : une référence amorcée il y a
+  // longtemps (expiresAt dépassée) ne doit plus jamais pouvoir être activée,
+  // même par un webhook signé et frais.
+  it("rejects a webhook on a PENDING payment whose expiresAt is in the past (BIL-19)", async () => {
+    const { enterprise, subscription } = await createEnterpriseWithActiveUser("TRIAL");
+    const past = new Date(Date.now() - 3_600_000);
+    const { paymentId, providerReference } = await createPendingPayment(enterprise.id, subscription.id, 5_000, past);
+    const payload = { reference: providerReference, status: "succeeded", amount: 5_000, currency: "XOF" };
+
+    await postWebhook("WAVE", payload, wave.secret).expect(409);
+
+    const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
+    expect(payment.status).toBe("EXPIRED");
+
+    const updatedSubscription = await prisma.subscription.findUniqueOrThrow({ where: { id: subscription.id } });
+    expect(updatedSubscription.status).toBe("TRIAL");
+
+    const invoices = await prisma.invoice.findMany({ where: { enterpriseId: enterprise.id } });
+    expect(invoices).toHaveLength(0);
+
+    const rejections = await prisma.auditLog.findMany({
+      where: { enterpriseId: enterprise.id, resourceId: paymentId, action: "PAYMENT_WEBHOOK_REJECTED" },
+    });
+    expect(rejections).toHaveLength(1);
+    expect(rejections[0]!.metadata).toMatchObject({ httpStatus: 409, reason: "payment_expired" });
+  });
+
+  // Non-régression : le golden path (paiement pas encore expiré) ne doit
+  // jamais être affecté par ce contrôle.
+  it("processes a webhook normally when the pending payment has a future expiresAt (BIL-19 non-regression)", async () => {
+    const { enterprise, subscription } = await createEnterpriseWithActiveUser("TRIAL");
+    const future = new Date(Date.now() + 24 * 3_600_000);
+    const { paymentId, providerReference } = await createPendingPayment(
+      enterprise.id,
+      subscription.id,
+      5_000,
+      future,
+    );
+    const payload = { reference: providerReference, status: "succeeded", amount: 5_000, currency: "XOF" };
+
+    const res = await postWebhook("WAVE", payload, wave.secret).expect(200);
+    expect(res.body.outcome).toBe("processed");
+
+    const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
+    expect(payment.status).toBe("SUCCEEDED");
+
+    const updatedSubscription = await prisma.subscription.findUniqueOrThrow({ where: { id: subscription.id } });
+    expect(updatedSubscription.status).toBe("ACTIVE");
   });
 
   it("on failure: moves an ACTIVE subscription to PAST_DUE, sets a grace-period renewal date, and notifies", async () => {

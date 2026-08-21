@@ -1055,7 +1055,42 @@ et écrit sur stdout (BIL-11).
   paiement expiré (avec audit), et purger/expirer les intentions anciennes via la tâche
   planifiée de BIL-03.
 - **Priorité** : P3
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-21) — `Payment.expiresAt` (nullable, migration
+  additive, aucun backfill des lignes existantes — un `PENDING` historique
+  sans `expiresAt` n'expire jamais rétroactivement), posée une seule fois à
+  la création par `PaymentsBootstrapService` depuis l'unique source de
+  vérité du TTL (`env.paymentPendingExpiryHours()`, défaut 24h) — ni le
+  webhook ni le job planifié ne recalculent leur propre délai, ils ne font
+  que comparer cette date déjà persistée. Deux mécanismes complémentaires,
+  même patron CAS que `SubscriptionLifecycleService` (BIL-03) :
+  - **Réactif** (`payments-webhook.service.ts`) : un webhook sur un `Payment`
+    encore `PENDING` dont `expiresAt` est dépassée est refusé (409,
+    `PAYMENT_WEBHOOK_REJECTED`/`payment_expired`), après un
+    compare-and-swap `PENDING→EXPIRED` — jamais d'activation d'abonnement
+    sur une intention expirée, même par un webhook signé et frais.
+  - **Proactif** : nouveau `PaymentLifecycleService`
+    (`apps/api/src/payments/payment-lifecycle.service.ts`), `@Cron` horaire,
+    purge les `PENDING` expirés via `CrossTenantRepository` (jamais d'accès
+    direct au modèle `Payment` hors repository, CLAUDE.md §5) ; chaque
+    transition passe par un `EXPIRE_PAYMENT` en `AuditLog` (nouvelle action,
+    migration additive), jamais de `SubscriptionEvent` ni de notification
+    (aucune conséquence sur l'abonnement, sévérité LOW/P3).
+  Nouveau statut `EXPIRED` sur `PaymentStatus`, distinct de `FAILED`
+  (un `FAILED` est un rejet actif du fournisseur, un `EXPIRED` une intention
+  jamais honorée — les confondre fausserait les métriques d'échec de
+  paiement). Vérifié par `payment-lifecycle.integration.spec.ts` (nominal,
+  no-op sur `PENDING` non expiré/sans `expiresAt`/déjà résolu, idempotence,
+  isolation sur plusieurs paiements/entreprises, et deux tests de
+  compare-and-swap déterministes — un `Promise.all` de deux tentatives
+  concurrentes réelles sur la même ligne, et une interleaving simulée d'un
+  webhook concurrent entre la lecture batch du job et son écriture, aucun
+  des deux ne dépendant du timing aléatoire de Jest) et par deux ajouts à
+  `payments-webhook.integration.spec.ts` (rejet 409 sur paiement expiré +
+  non-régression explicite du golden path avec `expiresAt` future) et un
+  ajout à `payments-bootstrap.integration.spec.ts` (`expiresAt` posée à la
+  création, dérivée du TTL configuré). Migration `up`/`down` testée sur
+  base de dev. Aucun changement dans `serializable-retry`, les repositories
+  Stock/Sales/Purchases, RLS ou les BIL précédents.
 
 ### BIL-20
 

@@ -73,7 +73,7 @@ export class PaymentWebhookService {
       throw error;
     }
 
-    const payment = await this.prisma.payment.findUnique({
+    let payment = await this.prisma.payment.findUnique({
       where: { provider_providerReference: { provider, providerReference: event.providerReference } },
     });
 
@@ -91,6 +91,34 @@ export class PaymentWebhookService {
         providerReference: event.providerReference,
       });
       throw new NotFoundException("Aucun paiement en attente pour cette référence");
+    }
+
+    // BIL-19 (docs/audit/BILLING-AUDIT.md) : un paiement PENDING dont
+    // l'intention n'a jamais été honorée avant expiresAt ne doit plus jamais
+    // pouvoir être activé, même par un webhook signé et frais. Compare-and-
+    // swap (même patron que PaymentLifecycleService) : si le job planifié
+    // (ou un autre appel concurrent) a déjà résolu ce Payment entre notre
+    // lecture et cette écriture, count vaut 0 — on relit l'état à jour et on
+    // laisse la branche générique ci-dessous (déjà résolu/en conflit)
+    // décider, sans jamais écraser un état plus frais.
+    if (payment.status === "PENDING" && payment.expiresAt && payment.expiresAt.getTime() < Date.now()) {
+      const { count } = await this.prisma.payment.updateMany({
+        where: { id: payment.id, status: "PENDING" },
+        data: { status: "EXPIRED" },
+      });
+      if (count === 1) {
+        await this.auditRejection({
+          httpStatus: 409,
+          reason: "payment_expired",
+          provider,
+          rawBody,
+          providerReference: event.providerReference,
+          enterpriseId: payment.enterpriseId,
+          paymentId: payment.id,
+        });
+        throw new ConflictException("Ce paiement a expiré");
+      }
+      payment = await this.prisma.payment.findUniqueOrThrow({ where: { id: payment.id } });
     }
 
     if (payment.status !== "PENDING") {

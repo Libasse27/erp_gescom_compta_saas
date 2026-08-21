@@ -42,6 +42,12 @@ export const env = {
   // cité par docs/adr/0010-... — borne combien de temps un corps signé
   // reste rejouable tel quel.
   paymentWebhookReplayToleranceSeconds: () => Number(process.env.PAYMENT_WEBHOOK_REPLAY_TOLERANCE_SECONDS ?? 300),
+  // Corrige BIL-19 (docs/audit/BILLING-AUDIT.md) : source unique du TTL d'un
+  // Payment PENDING amorcé (checkout). Lu une seule fois, par
+  // PaymentsBootstrapService, pour poser Payment.expiresAt à la création —
+  // PaymentWebhookService et PaymentLifecycleService ne font que comparer
+  // cette date déjà persistée, jamais recalculer leur propre TTL.
+  paymentPendingExpiryHours: () => Number(process.env.PAYMENT_PENDING_EXPIRY_HOURS ?? 24),
   // Liste blanche stricte (CLAUDE.md §6) — jamais "*". apps/web appelle
   // l'API directement depuis le navigateur pour les requêtes authentifiées
   // (Phase 7) ; séparées par virgule pour couvrir plusieurs environnements

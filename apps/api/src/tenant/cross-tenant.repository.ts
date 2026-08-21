@@ -119,6 +119,8 @@ export class CrossTenantRepository {
 
   // Amorce un Payment(PENDING) — tient lieu de flux de checkout réel, qui
   // n'existe pas avant la Phase 6/7 (docs/PROMPT-MAITRE-SAAS.md Phase 5).
+  // expiresAt (BIL-19) est posée une seule fois ici par l'appelant
+  // (PaymentsBootstrapService), jamais recalculée par ce repository.
   createPendingPayment(data: {
     enterpriseId: string;
     subscriptionId: string;
@@ -126,8 +128,30 @@ export class CrossTenantRepository {
     providerReference: string;
     amount: number;
     currency: string;
+    expiresAt: Date;
   }): Promise<Payment> {
     return this.prisma.payment.create({ data: { ...data, status: "PENDING" } });
+  }
+
+  // Corrige BIL-19 (docs/audit/BILLING-AUDIT.md) : source de vérité pour
+  // PaymentLifecycleService — un paiement PENDING dont l'intention n'a
+  // jamais été honorée avant expiresAt.
+  findExpirablePendingPayments(now: Date): Promise<Payment[]> {
+    return this.prisma.payment.findMany({
+      where: { status: "PENDING", expiresAt: { lt: now } },
+    });
+  }
+
+  // Compare-and-swap (même patron que updateSubscriptionStatus, BIL-03) :
+  // count === 0 signale qu'un autre traitement concurrent (webhook de
+  // paiement, ou une autre exécution du job) a déjà résolu ce Payment entre
+  // la lecture batch et cette écriture — jamais d'écrasement d'un état plus
+  // frais (SUCCEEDED/FAILED), jamais de double transition.
+  expirePendingPayment(paymentId: string): Promise<{ count: number }> {
+    return this.prisma.payment.updateMany({
+      where: { id: paymentId, status: "PENDING" },
+      data: { status: "EXPIRED" },
+    });
   }
 
   // Corrige BIL-04 (docs/audit/BILLING-AUDIT.md) : jusqu'ici, aucune route

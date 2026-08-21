@@ -53,6 +53,11 @@ enum PaymentStatus {
   SUCCEEDED
   FAILED
   REFUNDED
+  // Corrige BIL-19 (docs/audit/BILLING-AUDIT.md) : distinct de FAILED — un
+  // FAILED est un rejet actif du fournisseur, un EXPIRED est une intention
+  // PENDING jamais honorée avant sa date d'expiration (les confondre
+  // fausserait les métriques d'échec de paiement fournisseur).
+  EXPIRED
 }
 
 enum InvoiceStatus {
@@ -158,6 +163,11 @@ enum AuditAction {
   UPDATE_PLAN
   UPDATE_PLAN_FEATURE
   UPDATE_PLAN_LIMIT
+  // Corrige BIL-19 (docs/audit/BILLING-AUDIT.md) : transition automatique
+  // PENDING->EXPIRED par PaymentLifecycleService, même esprit que
+  // EXPIRE_TRIAL/SUSPEND_SUBSCRIPTION (BIL-03) — pas une action d'un
+  // utilisateur.
+  EXPIRE_PAYMENT
 }
 
 // ACTIVE : jamais utilisé. ROTATED : échangé contre un nouveau token (rotation
@@ -1017,12 +1027,20 @@ model Payment {
   metadata          Json?
   createdAt         DateTime        @default(now()) @map("created_at")
   updatedAt         DateTime        @updatedAt @map("updated_at")
+  // Corrige BIL-19 (docs/audit/BILLING-AUDIT.md) : nullable pour préserver
+  // les paiements historiques créés avant cette migration (jamais expirés
+  // rétroactivement, pas de backfill) — NULL = pas de date d'expiration.
+  // Posée une seule fois à la création (PaymentsBootstrapService), jamais
+  // recalculée ensuite.
+  expiresAt         DateTime?       @map("expires_at")
 
   // Idempotence webhook (Phase 5) : une référence donnée chez un fournisseur
   // ne peut créer qu'un seul paiement.
   @@unique([provider, providerReference])
   @@index([enterpriseId])
   @@index([invoiceId])
+  // Corrige BIL-19 : requête du job planifié (PENDING + expiresAt <= now).
+  @@index([status, expiresAt])
   @@map("payments")
 }
 

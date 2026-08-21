@@ -7,6 +7,7 @@ import { AppModule } from "../app.module";
 import { RawDbClient } from "../prisma/raw-db-client";
 import { PasswordService } from "../auth/password.service";
 import { MfaService } from "../auth/mfa.service";
+import { env } from "../config/env";
 
 // BIL-05 (docs/audit/BILLING-AUDIT.md) : le montant d'un paiement amorcé par
 // le Super Admin ne doit jamais venir du corps de la requête — il doit être
@@ -105,6 +106,30 @@ describe("PaymentsBootstrapController (integration) — BIL-05", () => {
     const payment = await prisma.payment.findUniqueOrThrow({ where: { id: res.body.paymentId } });
     expect(payment.amount).toBe(7_500);
     expect(payment.currency).toBe("XOF");
+  });
+
+  // BIL-19 (docs/audit/BILLING-AUDIT.md) : expiresAt doit être posée à la
+  // création, dérivée de la seule source de vérité du TTL (env.ts), jamais
+  // laissée nulle pour un nouveau paiement.
+  it("sets expiresAt from env.paymentPendingExpiryHours() at creation (BIL-19)", async () => {
+    const superAdminToken = await createSuperAdminToken();
+    const { enterprise } = await createEnterpriseWithSubscription(7_500, 75_000);
+    const before = Date.now();
+
+    const res = await request(app.getHttpServer())
+      .post(`/admin/enterprises/${enterprise.id}/payments`)
+      .set("Authorization", `Bearer ${superAdminToken}`)
+      .send({ provider: "WAVE", providerReference: `ref-${randomUUID()}`, billingPeriod: "MONTHLY" })
+      .expect(201);
+
+    const payment = await prisma.payment.findUniqueOrThrow({ where: { id: res.body.paymentId } });
+    expect(payment.expiresAt).not.toBeNull();
+
+    const expectedTtlMs = env.paymentPendingExpiryHours() * 3_600_000;
+    const actualTtlMs = payment.expiresAt!.getTime() - before;
+    // Tolérance large (10 s) pour l'écart d'exécution du test lui-même,
+    // jamais pour une dérive du TTL configuré.
+    expect(Math.abs(actualTtlMs - expectedTtlMs)).toBeLessThan(10_000);
   });
 
   // BIL-16 (docs/audit/BILLING-AUDIT.md) : createPendingPaymentSchema est

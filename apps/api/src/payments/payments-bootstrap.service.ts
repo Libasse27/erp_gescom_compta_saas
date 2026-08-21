@@ -2,6 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from "@nestjs/common
 import { CreatePendingPaymentInput } from "@erp/validation";
 import { AuditLogService } from "../common/audit/audit-log.service";
 import { RequestMetadata } from "../auth/auth.service";
+import { env } from "../config/env";
 import { CrossTenantRepository } from "../tenant/cross-tenant.repository";
 
 // Amorce un Payment(PENDING) côté Super Admin — tient lieu de flux de
@@ -34,6 +35,11 @@ export class PaymentsBootstrapService {
     }
     const currency = enterprise.currency;
 
+    // BIL-19 (docs/audit/BILLING-AUDIT.md) : posée une seule fois, ici, à la
+    // création — ni le webhook ni le job planifié ne recalculent leur propre
+    // TTL, ils ne font que comparer cette date déjà persistée.
+    const expiresAt = new Date(Date.now() + env.paymentPendingExpiryHours() * 3_600_000);
+
     const payment = await this.crossTenant.createPendingPayment({
       enterpriseId,
       subscriptionId: enterprise.currentSubscription.id,
@@ -41,6 +47,7 @@ export class PaymentsBootstrapService {
       providerReference: input.providerReference,
       amount,
       currency,
+      expiresAt,
     });
 
     await this.auditLog.record({
