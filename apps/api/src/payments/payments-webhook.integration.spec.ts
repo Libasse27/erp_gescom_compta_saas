@@ -104,7 +104,7 @@ describe("PaymentsWebhookController (integration)", () => {
     return req.send(rawBodyString);
   }
 
-  async function createEnterpriseWithActiveUser(subscriptionStatus: "TRIAL" | "ACTIVE") {
+  async function createEnterpriseWithActiveUser(subscriptionStatus: "TRIAL" | "ACTIVE" | "CANCELLED") {
     const enterprise = await prisma.enterprise.create({ data: { name: `Webhook Test ${randomUUID()}` } });
     createdEnterpriseIds.push(enterprise.id);
 
@@ -560,6 +560,43 @@ describe("PaymentsWebhookController (integration)", () => {
 
     const updatedSubscription = await prisma.subscription.findUniqueOrThrow({ where: { id: subscription.id } });
     expect(updatedSubscription.status).toBe("ACTIVE");
+  });
+
+  // BIL-20 (docs/audit/BILLING-AUDIT.md) : la machine à états
+  // (subscription-state-machine.ts) est déjà correctement gardée, mais
+  // jusqu'ici aucun test ne prouvait qu'une transition illégale est
+  // effectivement refusée à travers une vraie route HTTP — seulement en
+  // unitaire. CANCELLED est un état terminal (ALLOWED_TRANSITIONS.CANCELLED
+  // = []) : un webhook "succeeded" tentant CANCELLED -> ACTIVE doit être
+  // rejeté, et surtout la transaction (payments-webhook.service.ts) doit
+  // être intégralement annulée — pas seulement le statut de l'abonnement,
+  // aussi le Payment (compare-and-swap PENDING -> SUCCEEDED déjà exécuté
+  // plus tôt dans la même transaction), sans quoi le paiement resterait
+  // marqué SUCCEEDED pour un abonnement jamais réactivé.
+  it("rejects CANCELLED -> ACTIVE via a real webhook, with a full transactional rollback (BIL-20)", async () => {
+    const { enterprise, subscription } = await createEnterpriseWithActiveUser("CANCELLED");
+    const { paymentId, providerReference } = await createPendingPayment(enterprise.id, subscription.id, 5_000);
+    const payload = { reference: providerReference, status: "succeeded", amount: 5_000, currency: "XOF" };
+
+    await postWebhook("WAVE", payload, wave.secret).expect(409);
+
+    const payment = await prisma.payment.findUniqueOrThrow({ where: { id: paymentId } });
+    expect(payment.status).toBe("PENDING");
+
+    const updatedSubscription = await prisma.subscription.findUniqueOrThrow({ where: { id: subscription.id } });
+    expect(updatedSubscription.status).toBe("CANCELLED");
+
+    const events = await prisma.subscriptionEvent.findMany({ where: { subscriptionId: subscription.id } });
+    expect(events).toHaveLength(0);
+
+    const invoices = await prisma.invoice.findMany({ where: { enterpriseId: enterprise.id } });
+    expect(invoices).toHaveLength(0);
+
+    const rejections = await prisma.auditLog.findMany({
+      where: { enterpriseId: enterprise.id, resourceId: paymentId, action: "PAYMENT_WEBHOOK_REJECTED" },
+    });
+    expect(rejections).toHaveLength(1);
+    expect(rejections[0]!.metadata).toMatchObject({ httpStatus: 409, reason: "invalid_subscription_transition" });
   });
 
   it("on failure: moves an ACTIVE subscription to PAST_DUE, sets a grace-period renewal date, and notifies", async () => {

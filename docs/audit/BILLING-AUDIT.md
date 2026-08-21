@@ -1114,7 +1114,42 @@ et écrit sur stdout (BIL-11).
   service de cycle de vie (voir BIL-03) et ajouter un test/lint interdisant
   `subscription.update({ data: { status } })` ailleurs.
 - **Priorité** : P4
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-21) — **option retenue : tests uniquement**,
+  pas la centralisation suggérée par la solution initiale : les 2 seuls
+  écrivains réels de `Subscription.status` du dépôt aujourd'hui
+  (`payments-webhook.service.ts:250`, gardé par `assertSubscriptionTransition`
+  juste avant dans la même transaction ; `cross-tenant.repository.ts`
+  `updateSubscriptionStatus`, seule appelée depuis
+  `subscription-lifecycle.service.ts` qui la garde de même, BIL-03) sont déjà
+  correctement gardés — le risque du finding est prospectif (régression
+  silencieuse future), pas un défaut présent. Centraliser aurait touché
+  `payments-webhook.service.ts` dans sa transaction ADR-0008/BIL-18, rouvrant
+  un arbitrage déjà tranché pour un gain nul ; non retenu. Pas de règle
+  ESLint custom non plus (lift disproportionné pour un P4).
+  Deux tests ajoutés à la place :
+  - `subscription-status-write-guard.spec.ts` (nouveau) — même patron que
+    `auth-throttling.spec.ts` (BIL-14) : découverte dynamique par lecture du
+    système de fichiers, aucune liste manuelle de fichiers à tenir à jour.
+    Invariant A : toute écriture directe `.subscription.update(Many)`
+    contenant `status` doit être précédée, dans le même fichier, d'un appel
+    `assertSubscriptionTransition(...)` (sauf la primitive CAS
+    `updateSubscriptionStatus` elle-même, qui reporte délibérément la garde
+    à ses appelants). Invariant B : tout appel à cette primitive doit à son
+    tour être gardé dans son fichier appelant. Sensibilité à une dérive
+    future vérifiée manuellement (injection temporaire d'une écriture non
+    gardée dans `changeSubscriptionPlan` → échec immédiat et précis du test,
+    fichier+ligne+méthode identifiés ; retiré ensuite).
+  - `payments-webhook.integration.spec.ts` — nouveau test bout-en-bout :
+    `CANCELLED -> ACTIVE` (état terminal, `ALLOWED_TRANSITIONS.CANCELLED =
+    []`) tenté par un vrai webhook `succeeded` → `409`,
+    `invalid_subscription_transition`. Vérifie surtout le rollback
+    transactionnel complet (pas seulement le code HTTP) : `Payment` reste
+    `PENDING` (le compare-and-swap `PENDING->SUCCEEDED` déjà exécuté plus tôt
+    dans la même transaction est bien annulé), `Subscription` reste
+    `CANCELLED`, aucun `SubscriptionEvent`, aucune facture.
+  Aucun fichier de code applicatif modifié — `payments-webhook.service.ts`,
+  `tenant-scoped-prisma.service.ts`, la transaction ADR-0008 et la
+  résolution du tenant restent intacts (BIL-18 non rouvert).
 
 ### BIL-21
 
