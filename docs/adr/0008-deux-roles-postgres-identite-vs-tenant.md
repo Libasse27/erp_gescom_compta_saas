@@ -68,6 +68,44 @@ Deux rôles applicatifs PostgreSQL distincts, donc deux connexions Prisma :
    entreprise via une requête scopée tenant — à réévaluer quand un tel
    endpoint existera (probablement Phase 7, écran d'audit côté entreprise).
 
+## Mise à jour — 2026-08-20 (BIL-18, docs/audit/BILLING-AUDIT.md)
+`PaymentWebhookService` n'apparaît pas dans la liste d'origine ci-dessus —
+son usage de la connexion identité a été constaté après coup (MT-01,
+`docs/audit/MULTI-TENANT-AUDIT.md`), pas explicitement autorisé par cet ADR
+au moment de sa rédaction. BIL-18 a réexaminé ce cas précisément.
+
+**Pourquoi ce service reste sur la connexion identité pour tout son
+traitement, pas seulement la résolution initiale du tenant** : la première
+requête (`payment.findUnique` par `(provider, providerReference)`, une
+colonne `@unique`) est un cas pré-tenant légitime au sens de cet ADR — le
+tenant n'est pas encore connu. Une fois `payment.enterpriseId` résolu, le
+tenant EST connu ; on pourrait imaginer basculer la suite du traitement vers
+`TenantScopedPrismaService`. Ce n'est **pas** fait, parce que la suite du
+traitement (compare-and-swap du statut du paiement, transition de statut de
+l'abonnement, création de `SubscriptionEvent`, génération de facture)
+s'exécute dans **une seule transaction SQL atomique**
+(`payments-webhook.service.ts`, `this.prisma.$transaction(...)`) — une
+garantie acquise et durcie par BIL-01 (compare-and-swap), BIL-08 (transitions
+TRIAL) et BIL-09 (traçabilité des rejets). `PrismaService` et
+`TenantScopedPrismaService` sont deux `PrismaClient` sur deux connexions
+Postgres distinctes : ils ne peuvent pas partager une transaction. Scinder le
+traitement casserait cette atomicité (risque de paiement confirmé sans
+abonnement mis à jour, ou l'inverse, en cas d'échec entre les deux
+connexions) pour un gain marginal — le tenant est de toute façon déjà
+correctement scopé par le code (jamais par le payload, voir
+`payments-webhook.service.ts:74-92`).
+
+**Cela ne constitue pas une fuite inter-tenant démontrée.** Aucune requête de
+ce service ne fait de liste **non scopée** — la seule requête en forme de
+liste (`notifyEnterprise`, `user.findFirst({ where: { enterpriseId, status:
+"ACTIVE" } })`) est filtrée par un `enterpriseId` déjà résolu depuis le
+`Payment` trouvé par clé unique, jamais depuis une entrée non vérifiée.
+`payments-webhook.integration.spec.ts` porte désormais un test dédié (deux
+entreprises traitées par des webhooks concurrents, aucune donnée de l'une
+n'apparaît jamais dans le traitement de l'autre) qui joue le rôle de filet
+de sécurité applicatif à la place du filet RLS absent sur cette connexion
+pour ce flux précis.
+
 ## Conséquences
 - Deux `PrismaClient` distincts dans `apps/api` : `PrismaService` (rôle
   identité, inchangé) et `TenantScopedPrismaService` (nouveau, rôle tenant).

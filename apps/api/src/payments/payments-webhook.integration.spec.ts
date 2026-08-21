@@ -275,6 +275,90 @@ describe("PaymentsWebhookController (integration)", () => {
     expect(events).toHaveLength(1);
   });
 
+  // BIL-18 (docs/audit/BILLING-AUDIT.md) : ce service traite le webhook sur
+  // la connexion "identité" (erp_app_identity, BYPASSRLS — docs/adr/0008-...,
+  // amendé par docs/adr/0018-...), volontairement hors RLS pour préserver
+  // l'atomicité transactionnelle acquise par BIL-01/BIL-08/BIL-09 — voir
+  // l'amendement BIL-18 de l'ADR 0008. Ce test est le filet de sécurité
+  // applicatif qui remplace la garantie base pour ce flux précis : deux
+  // entreprises traitées en même temps ne doivent jamais se contaminer, y
+  // compris via notifyEnterprise() qui interroge `user` par enterpriseId
+  // (pas par une colonne @unique) sur cette même connexion — le point le
+  // plus exposé identifié par l'analyse BIL-18.
+  it("never leaks state between two enterprises processed concurrently (BIL-18)", async () => {
+    const {
+      enterprise: enterpriseA,
+      subscription: subscriptionA,
+      user: userA,
+    } = await createEnterpriseWithActiveUser("TRIAL");
+    const {
+      enterprise: enterpriseB,
+      subscription: subscriptionB,
+      user: userB,
+    } = await createEnterpriseWithActiveUser("TRIAL");
+
+    const { providerReference: refA } = await createPendingPayment(enterpriseA.id, subscriptionA.id, 5_000);
+    const { providerReference: refB } = await createPendingPayment(enterpriseB.id, subscriptionB.id, 9_000);
+
+    const payloadA = { reference: refA, status: "succeeded", amount: 5_000, currency: "XOF" };
+    const payloadB = { reference: refB, status: "succeeded", amount: 9_000, currency: "XOF" };
+
+    // Livraisons concurrentes et entrelacées (pas séquentielles) : reproduit
+    // deux fournisseurs livrant en même temps pour deux entreprises
+    // différentes, pas un traitement l'un après l'autre.
+    const [resA, resB] = await Promise.all([
+      postWebhook("WAVE", payloadA, wave.secret).expect(200),
+      postWebhook("WAVE", payloadB, wave.secret).expect(200),
+    ]);
+    expect(resA.body.outcome).toBe("processed");
+    expect(resB.body.outcome).toBe("processed");
+
+    // Chaque paiement ne reflète que son propre montant et sa propre
+    // entreprise — un croisement changerait le montant observé (5 000 vs
+    // 9 000), pas seulement l'enterpriseId.
+    const paymentA = await prisma.payment.findUniqueOrThrow({
+      where: { provider_providerReference: { provider: "WAVE", providerReference: refA } },
+    });
+    const paymentB = await prisma.payment.findUniqueOrThrow({
+      where: { provider_providerReference: { provider: "WAVE", providerReference: refB } },
+    });
+    expect(paymentA.enterpriseId).toBe(enterpriseA.id);
+    expect(paymentA.amount).toBe(5_000);
+    expect(paymentB.enterpriseId).toBe(enterpriseB.id);
+    expect(paymentB.amount).toBe(9_000);
+
+    // Chaque abonnement passe ACTIVE indépendamment.
+    const refreshedSubA = await prisma.subscription.findUniqueOrThrow({ where: { id: subscriptionA.id } });
+    const refreshedSubB = await prisma.subscription.findUniqueOrThrow({ where: { id: subscriptionB.id } });
+    expect(refreshedSubA.status).toBe("ACTIVE");
+    expect(refreshedSubB.status).toBe("ACTIVE");
+
+    // Un seul SubscriptionEvent par entreprise, jamais un événement de A
+    // rattaché à l'abonnement de B ou inversement.
+    const eventsA = await prisma.subscriptionEvent.findMany({ where: { subscriptionId: subscriptionA.id } });
+    const eventsB = await prisma.subscriptionEvent.findMany({ where: { subscriptionId: subscriptionB.id } });
+    expect(eventsA).toHaveLength(1);
+    expect(eventsB).toHaveLength(1);
+
+    // Une seule facture par entreprise, rattachée au bon paiement.
+    const invoicesA = await prisma.invoice.findMany({ where: { enterpriseId: enterpriseA.id } });
+    const invoicesB = await prisma.invoice.findMany({ where: { enterpriseId: enterpriseB.id } });
+    expect(invoicesA).toHaveLength(1);
+    expect(invoicesA[0]!.paymentId).toBe(paymentA.id);
+    expect(invoicesB).toHaveLength(1);
+    expect(invoicesB[0]!.paymentId).toBe(paymentB.id);
+
+    // Chaque utilisateur ne reçoit que la notification de sa propre
+    // entreprise — preuve directe que notifyEnterprise() (findFirst par
+    // enterpriseId, pas par clé unique) ne s'est jamais trompé de tenant.
+    const notificationsA = await prisma.notification.findMany({ where: { userId: userA.id } });
+    const notificationsB = await prisma.notification.findMany({ where: { userId: userB.id } });
+    expect(notificationsA).toHaveLength(1);
+    expect(notificationsA[0]!.enterpriseId).toBe(enterpriseA.id);
+    expect(notificationsB).toHaveLength(1);
+    expect(notificationsB[0]!.enterpriseId).toBe(enterpriseB.id);
+  });
+
   it("rejects a webhook with no signature header, without changing any state", async () => {
     const { enterprise, subscription } = await createEnterpriseWithActiveUser("TRIAL");
     const { paymentId, providerReference } = await createPendingPayment(enterprise.id, subscription.id);

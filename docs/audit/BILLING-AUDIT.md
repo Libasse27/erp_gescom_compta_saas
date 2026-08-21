@@ -1011,7 +1011,32 @@ et écrit sur stdout (BIL-11).
   l'exception dans l'ADR 0008 et ajouter un test asseyant que le webhook ne peut pas
   écrire hors de l'entreprise du paiement.
 - **Priorité** : P3
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-20) — **prémisse partiellement obsolète
+  constatée avant correction** : ce finding cite `PrismaService` comme
+  connecté via `DATABASE_URL` au rôle propriétaire ; il se connecte
+  aujourd'hui via `IDENTITY_DATABASE_URL` au rôle dédié `erp_app_identity`
+  (`NOSUPERUSER`, non propriétaire, `BYPASSRLS` explicite) — corrigé par
+  MT-01 (`docs/audit/MULTI-TENANT-AUDIT.md`), documenté dans
+  `docs/adr/0018-role-identite-bypassrls-non-superuser.md` (2026-08-16,
+  postérieur à la rédaction de ce finding). Le risque de fond reste
+  néanmoins valide : RLS reste bypassée pour cette connexion, par attribut
+  de rôle explicite désormais plutôt que par effet de bord de l'ownership.
+  **Option retenue : B** (documentation + test de garde), pas la migration
+  vers `TenantScopedPrismaService` proposée en premier — cette dernière
+  romprait l'atomicité transactionnelle unique dont dépendent BIL-01/BIL-08/
+  BIL-09 (`PrismaService` et `TenantScopedPrismaService` sont deux connexions
+  Postgres distinctes, incapables de partager une transaction SQL), un
+  risque disproportionné pour un finding LOW/P3. `docs/adr/0008-...` amendé
+  avec une section dédiée à `PaymentWebhookService`, justifiant ce choix et
+  précisant qu'aucune fuite inter-tenant n'est démontrée aujourd'hui — le
+  point le plus exposé identifié (`notifyEnterprise`, requête en forme de
+  liste par `enterpriseId`, pas par clé unique) reste sûr car son
+  `enterpriseId` provient toujours du `Payment` déjà résolu par clé unique,
+  jamais du payload. Test ajouté :
+  `payments-webhook.integration.spec.ts` — deux entreprises traitées par des
+  webhooks concurrents (paiement, abonnement, facture, notification), aucune
+  donnée de l'une n'apparaît jamais dans le traitement de l'autre. Aucun
+  fichier de code applicatif modifié.
 
 ### BIL-19
 
