@@ -1170,7 +1170,22 @@ et écrit sur stdout (BIL-11).
 - **Solution** : ajouter une règle de garde en CI (interdiction de `Float`/`Decimal`
   dans `schema.prisma`) pour verrouiller cet acquis.
 - **Priorité** : P4
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-21) — garde posée sous forme de test
+  (`apps/api/src/prisma/schema-money-fields.spec.ts`), pas de nouveau step
+  GitHub Actions : `pnpm test` fait déjà partie du chemin bloquant de la CI,
+  cohérent avec le patron déjà établi pour BIL-14/BIL-20. Reconnaît
+  spécifiquement une déclaration de champ Prisma (`nomChamp Type`, `?`/`[]`
+  et attributs `@...` tolérés), jamais une simple recherche du mot
+  "Float"/"Decimal" dans le fichier — un commentaire les mentionnant, ou un
+  attribut `@db.Decimal(...)` sur un champ dont le type Prisma reste `Int`,
+  ne déclenchent jamais ce garde. Contrôle positif inclus (> 200 champs
+  effectivement analysés) contre un parseur silencieusement cassé qui
+  rendrait le test vacuously green. Sensibilité à une dérive vérifiée
+  manuellement : deux champs `Float`/`Decimal?` injectés temporairement dans
+  `schema.prisma` (`apps/api/prisma/payments.amount`) → échec immédiat et
+  précis (fichier+ligne+nom+type), retirés ensuite, jamais commités.
+  Aucun fichier de code applicatif, aucune migration, aucun changement de
+  `.github/workflows/`.
 
 ### BIL-22
 
