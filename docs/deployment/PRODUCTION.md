@@ -117,6 +117,68 @@ sortie de rotation), `GET /health` (alias de `/health/ready`, conservé pour
 compatibilité — c'est lui que le healthcheck Docker de `api` utilise
 aujourd'hui).
 
+## Rotation des secrets de paiement (BIL-22)
+
+Corrige `docs/audit/BILLING-AUDIT.md` BIL-22 : aucune procédure n'était
+écrite pour faire tourner `PAYMENT_WEBHOOK_SECRET_WAVE` /
+`_ORANGE_MONEY` / `_FREE_MONEY` / `_STRIPE` / `_CARD` (`docker/.env.prod`,
+lus par `env.paymentWebhookSecret()`) une fois un vrai fournisseur branché
+— à prévoir avant cette intégration, pas après.
+
+**Limite structurelle à connaître avant de dérouler cette procédure** :
+chaque fournisseur n'a aujourd'hui qu'**un seul** secret actif côté
+plateforme (une valeur par variable d'environnement, pas de fenêtre où deux
+secrets seraient simultanément valides côté `api`). Deux cas :
+
+- **Le fournisseur supporte une période de transition** (plusieurs secrets
+  de signature actifs simultanément sur son tableau de bord, ex. Stripe) :
+  la séquence ci-dessous est alors réellement sans coupure.
+- **Le fournisseur remplace le secret de façon atomique** (pas de
+  transition) : un très bref écart est possible entre le moment où le
+  fournisseur signe avec le nouveau secret et celui où `api` a redémarré
+  avec ce même secret. Ce n'est pas silencieux : un webhook livré pendant
+  cet écart reçoit un `401` (signature invalide) et **la quasi-totalité des
+  fournisseurs de paiement retentent automatiquement un webhook en échec**
+  ; l'idempotence déjà en place (`@@unique([provider, providerReference])`,
+  BIL-01) garantit qu'un rejeu après coup est traité exactement une fois,
+  sans perte ni doublon. Minimiser cet écart en préparant chaque étape à
+  l'avance (secret déjà généré, commande de redéploiement déjà prête) plutôt
+  qu'en l'improvisant.
+
+Séquence :
+
+1. **Identifier le secret concerné et son fournisseur** (une variable = un
+   fournisseur, jamais de valeur partagée entre deux fournisseurs).
+2. **Générer le nouveau secret côté fournisseur** (tableau de bord du
+   fournisseur — jamais généré côté plateforme : c'est lui qui signera avec
+   cette valeur).
+3. **Mettre à jour `docker/.env.prod` sur le VPS** avec la nouvelle valeur
+   (édition directe sur l'hôte — ce fichier n'est jamais commité, voir
+   `docker/.env.prod.example`).
+4. **Redéployer `api` pour charger le nouveau secret** :
+   ```bash
+   docker compose --env-file docker/.env.prod -f docker/docker-compose.prod.yml up -d api
+   ```
+5. **Déclencher un événement de test contrôlé** depuis le tableau de bord du
+   fournisseur (fonction « envoyer un webhook de test », quand elle existe)
+   et vérifier une réponse `200`.
+6. **Vérifier les logs immédiatement après** (`docs/deployment/LOGGING.md`)
+   — rechercher une fenêtre de temps sans aucun `PAYMENT_WEBHOOK_REJECTED`
+   dont `reason: "invalid_signature_or_timestamp"` pour ce fournisseur ;
+   la présence d'un seul rejet de ce type juste après le redéploiement est
+   le signal que le nouveau secret n'est pas encore correctement pris en
+   compte des deux côtés.
+7. **Révoquer l'ancien secret côté fournisseur seulement après cette
+   validation** — jamais avant, jamais en même temps que l'étape 4.
+8. **Ne jamais écrire la valeur du secret elle-même** dans Git, un log, ce
+   fichier ou `docs/audit/BILLING-AUDIT.md` — seule la procédure est
+   documentée ici, jamais une valeur réelle (voir Gitleaks ci-dessous).
+
+Gitleaks (`.github/workflows/ci.yml`, step « Scan de secrets (bloquant) »)
+est déjà une garde CI bloquante sur tout le dépôt, y compris ces secrets de
+paiement — BIL-22 ne la modifie pas, elle n'a pas besoin d'être dupliquée
+ici.
+
 ## Monitoring et alerting (P-08)
 
 `docs/deployment/MONITORING.md` — tracking d'erreurs Sentry (désactivé par

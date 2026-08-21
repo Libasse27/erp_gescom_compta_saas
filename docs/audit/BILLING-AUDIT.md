@@ -1206,7 +1206,28 @@ et écrit sur stdout (BIL-11).
   n'est pas déjà couvert, et prévoir la procédure de rotation des secrets de webhook
   avant l'intégration d'un fournisseur réel.
 - **Priorité** : P4
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-21) — Gitleaks est déjà une garde CI
+  bloquante (`.github/workflows/ci.yml`, step « Scan de secrets (bloquant) »,
+  vérifiée verte sur chaque run depuis BIL-18) : première moitié de la
+  solution déjà acquise avant ce finding, non modifiée, pas de garde
+  redondante ajoutée. Procédure de rotation ajoutée dans
+  `docs/deployment/PRODUCTION.md` (« Rotation des secrets de paiement »),
+  documentation uniquement — aucune automatisation prématurée d'une
+  procédure pour un fournisseur qui n'est pas encore intégré (Phase 5 reste
+  un stand-in Super Admin). Séquence contrôlée en 8 étapes, jamais un simple
+  remplacement de valeur : nouveau secret généré côté fournisseur → déployé
+  côté plateforme → validé par un événement de test réel et une vérification
+  des logs (absence de `invalid_signature_or_timestamp`) → révocation de
+  l'ancien secret **seulement après** cette validation, jamais avant/en même
+  temps. Limite structurelle assumée explicitement : la plateforme n'a
+  qu'un seul secret actif par fournisseur (pas de fenêtre à deux secrets
+  simultanément valides côté `api`) — un très bref écart reste possible si
+  le fournisseur ne supporte pas lui-même une période de transition ; le
+  filet de sécurité est l'idempotence déjà en place (`@@unique([provider,
+  providerReference])`, BIL-01) combinée aux retentatives automatiques des
+  fournisseurs de paiement sur un webhook en échec. Aucune valeur de secret
+  réelle n'apparaît nulle part dans la documentation. Aucun fichier de code
+  applicatif, aucune migration, aucun changement CI.
 
 ---
 
