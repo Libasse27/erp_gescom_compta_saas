@@ -7,6 +7,8 @@
 > `apps/api/src/entitlements/`, `apps/api/prisma/schema.prisma` (modèles Plan,
 > Feature, Limit, Subscription, Payment, Invoice, InvoiceCounter, OnboardingState),
 > `packages/validation/src/payments.ts`, et les tests associés.
+> Périmètre étendu le 2026-08-22 à `apps/api/src/invoicing/` (BIL-23) — angle mort
+> de la déclaration initiale, qui ne couvrait que les modèles Prisma associés.
 >
 > Méthode : lecture du code réel et des tests. Les ADR (`0003`, `0005`, `0010`) et
 > les messages de commit ont été traités comme des **déclarations d'intention à
@@ -20,10 +22,14 @@
 |----------|--------|
 | CRITICAL | 0 |
 | HIGH     | 5 |
-| MEDIUM   | 9 |
+| MEDIUM   | 10 |
 | LOW      | 5 |
 | INFO     | 3 |
-| **Total**| **22** |
+| **Total**| **23** |
+
+BIL-23 (2026-08-22, ajouté après extension de périmètre à `apps/api/src/invoicing/`,
+corrigé le jour même) : course concurrente non protégée sur la création de facture
+sans en-tête `Idempotency-Key` — voir §3 pour le détail.
 
 Aucune faille d'isolation inter-tenant ni de contournement d'authentification n'a été
 trouvée sur ce périmètre : la chaîne JWT → `TenantContext` → RLS est correctement
@@ -1228,6 +1234,62 @@ et écrit sur stdout (BIL-11).
   fournisseurs de paiement sur un webhook en échec. Aucune valeur de secret
   réelle n'apparaît nulle part dans la documentation. Aucun fichier de code
   applicatif, aucune migration, aucun changement CI.
+
+### BIL-23
+
+- **Sévérité** : MEDIUM
+- **Composant** : `apps/api/src/invoicing/invoicing.repository.ts` (hors périmètre
+  initial de cet audit — ajouté le 2026-08-22, voir note de périmètre ci-dessous)
+- **Description** : la protection contre la double facturation d'une vente repose sur
+  deux mécanismes : (1) un `findUnique({ where: { saleId } })` lu avant l'écriture
+  (vulnérable TOCTOU par construction), et (2) une contrainte unique DB sur `sale_id`
+  qui fait échouer un second `INSERT` concurrent avec `P2002`. Le `catch` ne traitait ce
+  `P2002` que si `idempotencyKey` était fourni — patron hérité de l'ADR-0019, conçu pour
+  la resynchronisation mobile hors-ligne où une clé est toujours présente. Or l'en-tête
+  `Idempotency-Key` est optionnel côté contrôleur (`invoicing.controller.ts:59`), et
+  l'ADR-0019 assume explicitement que le web « n'a pas ce problème en ligne stable » —
+  hypothèse non vérifiée par un test.
+- **Impact** : deux requêtes `POST /invoices` quasi simultanées pour la même vente,
+  sans `Idempotency-Key` (double-clic, double onglet, retry réseau) : la seconde
+  déclenchait un `P2002` non intercepté, remontant tel quel jusqu'au filtre
+  d'exception Nest par défaut (aucun filtre personnalisé dans ce projet,
+  `app.module.ts:82-88`) — réponse `500` générique au lieu du `409 "Cette vente est
+  déjà facturée"` attendu. Nest sanitise la réponse (pas de fuite du détail Prisma) :
+  aucune fuite d'information, aucune donnée corrompue ou dupliquée (la contrainte DB
+  protégeait déjà réellement l'intégrité) — défaut de qualité d'erreur, pas
+  d'intégrité.
+- **Risque** : `500` inattendu sur un flux financier pouvant déclencher une
+  re-tentative client inutile ou une alerte Sentry non pertinente une fois activée. Le
+  même patron (`if (idempotencyKey && ...P2002)`) existe à l'identique dans
+  `sales.repository.ts`, `purchases.repository.ts`, `stock.repository.ts`,
+  `journal.repository.ts` — hors périmètre de cet audit (facturation/paiement
+  uniquement), même cause structurelle si le scénario s'y reproduit.
+- **Fichier(s)** : `apps/api/src/invoicing/invoicing.repository.ts:147-150,181-193`,
+  `apps/api/src/invoicing/invoicing.controller.ts:59`.
+- **Solution** : intercepter tout `P2002` sur cette création, indépendamment de
+  `idempotencyKey`, et distinguer la contrainte réellement violée via
+  `error.meta.target` (vérifié empiriquement : Prisma 5.20/Postgres renvoie les noms
+  de colonnes DB, ex. `["sale_id"]`) plutôt que de présumer sa cause à partir de la
+  seule présence d'une clé.
+- **Priorité** : P2
+- **Statut** : CORRIGÉ (2026-08-22) — `catch` réécrit pour lire `error.meta.target` :
+  `sale_id` → `ConflictException("Cette vente est déjà facturée")` (que
+  `idempotencyKey` soit fourni ou non) ; `idempotency_key` → comportement idempotent
+  existant inchangé. Nouveau test d'intégration
+  (`invoicing.repository.spec.ts`, « resolves a genuine concurrent race without an
+  idempotency key... ») : deux créations réellement concurrentes (`Promise.allSettled`,
+  pas séquentielles) sur la même vente sans en-tête → exactement 1 succès + 1
+  `ConflictException`, jamais d'erreur brute, une seule facture en base. Scénario
+  idempotency-key existant (`returns the same invoice without creating a
+  duplicate...`) revérifié, toujours vert. `sales`/`purchases`/`stock`/`journal`
+  volontairement non modifiés (hors périmètre), ADR-0019 non modifiée (son mécanisme
+  reste valide, ce correctif ne fait qu'élargir la détection de la contrainte
+  distincte `sale_id`).
+
+**Note de périmètre** : `apps/api/src/invoicing/` n'était pas dans le périmètre
+initial déclaré de cet audit (ligne 5-9 ci-dessus ne couvre que les modèles Prisma
+`Invoice`/`InvoiceCounter`, pas le module `invoicing/`) — angle mort de portée
+corrigé par ce finding, périmètre étendu en conséquence pour les futures révisions.
 
 ---
 

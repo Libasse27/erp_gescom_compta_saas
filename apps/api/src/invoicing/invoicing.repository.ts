@@ -179,14 +179,37 @@ export class InvoicingRepository {
 
         return { view: this.toInvoiceView(invoice, sale), created: true };
       } catch (error) {
-        // Filet de concurrence, même patron que SalesRepository.create.
-        if (idempotencyKey && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-          const existingByKey = await tx.salesInvoice.findFirst({
-            where: { enterpriseId, idempotencyKey },
-            include: { sale: { include: { lines: { include: { product: true } }, customer: true } } },
-          });
-          if (existingByKey) {
-            return { view: this.toInvoiceView(existingByKey, existingByKey.sale), created: false };
+        // Corrige BIL-23 (docs/audit/BILLING-AUDIT.md) : le check TOCTOU
+        // ci-dessus (`existing = await tx.salesInvoice.findUnique(...)`) ne
+        // protège pas une vraie course concurrente — deux créations quasi
+        // simultanées pour la même vente, sans Idempotency-Key (en-tête
+        // optionnel, voir invoicing.controller.ts), peuvent toutes deux
+        // dépasser ce check et se disputer la contrainte unique `sale_id`.
+        // Avant ce correctif, seul un P2002 accompagné d'une clé
+        // d'idempotence était intercepté (patron ADR-0019, conçu pour la
+        // resynchronisation mobile où une clé est toujours présente) — un
+        // P2002 sur `sale_id` sans clé remontait tel quel (500 générique
+        // côté client, jamais le 409 métier prévu). `error.meta.target`
+        // identifie la contrainte réellement violée (vérifié empiriquement :
+        // Prisma 5.20/Postgres renvoie les noms de colonnes DB, ex.
+        // `["sale_id"]`) — jamais une simple présence de `idempotencyKey`,
+        // qui confondrait à tort un conflit sur une autre contrainte avec
+        // "cette vente est déjà facturée".
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+          const target = Array.isArray(error.meta?.target) ? (error.meta.target as string[]) : [];
+
+          if (target.includes("sale_id")) {
+            throw new ConflictException("Cette vente est déjà facturée");
+          }
+
+          if (idempotencyKey && target.includes("idempotency_key")) {
+            const existingByKey = await tx.salesInvoice.findFirst({
+              where: { enterpriseId, idempotencyKey },
+              include: { sale: { include: { lines: { include: { product: true } }, customer: true } } },
+            });
+            if (existingByKey) {
+              return { view: this.toInvoiceView(existingByKey, existingByKey.sale), created: false };
+            }
           }
         }
         throw error;

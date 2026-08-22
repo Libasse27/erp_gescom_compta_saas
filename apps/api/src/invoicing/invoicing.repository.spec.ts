@@ -225,6 +225,34 @@ describe("InvoicingRepository", () => {
     ).rejects.toThrow(ConflictException);
   });
 
+  // Régression BIL-23 (docs/audit/BILLING-AUDIT.md) : deux créations
+  // réellement concurrentes (Promise.all, pas séquentielles) pour la même
+  // vente, sans Idempotency-Key — le check TOCTOU ne suffit pas à lui seul
+  // à empêcher les deux requêtes de dépasser la lecture ; c'est la
+  // contrainte unique `sale_id` qui tranche. Avant le correctif, la
+  // requête perdante recevait le P2002 brut (non intercepté sans clé) au
+  // lieu du ConflictException métier.
+  it("resolves a genuine concurrent race without an idempotency key into exactly one success and one 409, never a raw error", async () => {
+    const enterprise = await createEnterprise();
+    const sale = await createConfirmedSale(enterprise.id);
+
+    const results = await Promise.allSettled([
+      asTenant(enterprise.id, () => repository.create(enterprise.id, { saleId: sale.id })),
+      asTenant(enterprise.id, () => repository.create(enterprise.id, { saleId: sale.id })),
+    ]);
+
+    const fulfilled = results.filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof repository.create>>> => r.status === "fulfilled");
+    const rejected = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toBeInstanceOf(ConflictException);
+    expect((rejected[0].reason as ConflictException).message).toBe("Cette vente est déjà facturée");
+
+    const invoices = await prisma.salesInvoice.findMany({ where: { enterpriseId: enterprise.id } });
+    expect(invoices).toHaveLength(1);
+  });
+
   it("throws NotFoundException when reading an invoice that belongs to another enterprise", async () => {
     const enterpriseA = await createEnterprise();
     const enterpriseB = await createEnterprise();
