@@ -40,9 +40,10 @@ Points d'entrée non authentifiés recensés : `GET /health`, `GET /v1/plans`,
 
 Aucun défaut classé CRITICAL n'a été confirmé : l'isolation multi-tenant repose bien sur une
 RLS Postgres réelle, forcée, avec un rôle applicatif non-superuser vérifié par un test
-automatisé. Les défauts HIGH portent sur l'authentification (confusion de jeton, statut de
-compte ignoré), sur la seconde connexion base de données (superuser) et sur des fuites de
-secrets par les journaux.
+automatisé. Les défauts HIGH portaient sur l'authentification (confusion de jeton, statut de
+compte ignoré), sur la seconde connexion base de données (superuser) et sur la confiance au
+reverse proxy (SEC-05) — 4 des 5 sont désormais corrigés, seul SEC-04 (SMTP réel) reste
+partiel, cf. `docs/deployment/STAGING.md` §5.
 
 ---
 
@@ -226,7 +227,14 @@ secrets par les journaux.
   vérifier que `req.ip` reflète l'IP client réelle. Test d'intégration avec un en-tête
   `X-Forwarded-For` contrôlé.
 - **Priorité** : P1
-- **Statut** : OUVERT
+- **Statut** : CORRIGÉ (2026-08-22) — `app.set("trust proxy", 1)` ajouté dans
+  `apps/api/src/main.ts` (un seul saut de proxy connu, jamais `true`) ;
+  `NestFactory.create` typé `<NestExpressApplication>` pour exposer `.set`.
+  Vérifié par un test d'intégration dédié
+  (`apps/api/src/common/trust-proxy.integration.spec.ts`) : une requête avec
+  un `X-Forwarded-For` contrôlé produit une entrée `LOGIN_FAILED` dont
+  `ipAddress` correspond exactement à l'IP transmise, pas à celle du proxy
+  de test.
 
 ### SEC-06
 

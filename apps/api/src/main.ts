@@ -3,6 +3,7 @@ import "./instrument";
 
 import helmet from "helmet";
 import { NestFactory } from "@nestjs/core";
+import { NestExpressApplication } from "@nestjs/platform-express";
 import { Logger, RequestMethod } from "@nestjs/common";
 import { AppModule } from "./app.module";
 import { env } from "./config/env";
@@ -17,7 +18,10 @@ async function bootstrap() {
   // logger : remplace le logger console par défaut de Nest dès le
   // bootstrap (Phase 10.5) — tout `new Logger(context)` de l'application,
   // y compris les messages internes de démarrage Nest, passe par lui.
-  const app = await NestFactory.create(AppModule, { rawBody: true, logger: new StructuredLoggerService() });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+    logger: new StructuredLoggerService(),
+  });
 
   // Corrige SEC-04 (docs/audit/SECURITY-AUDIT.md) : aucune intégration SMTP
   // réelle n'existe encore (Phase 24 du prompt maître) — ConsoleMailSender
@@ -33,6 +37,15 @@ async function bootstrap() {
         "n'envoient aucun courriel réel en production.",
     );
   }
+
+  // Corrige SEC-05 (docs/audit/SECURITY-AUDIT.md) : en production/staging,
+  // Caddy est le seul reverse proxy devant l'API (docker/Caddyfile) — sans
+  // "trust proxy", Express traite l'IP du conteneur Caddy comme req.ip,
+  // faussant à la fois le rate limiting par IP (ThrottlerGuard) et l'IP
+  // enregistrée dans le journal d'audit. "1" = un seul saut de proxy connu,
+  // jamais `true` (qui ferait confiance à n'importe quel X-Forwarded-For,
+  // y compris un en-tête falsifié par le client final).
+  app.set("trust proxy", 1);
 
   app.use(helmet());
   // Liste blanche stricte, jamais "*" (CLAUDE.md §6). credentials:true
