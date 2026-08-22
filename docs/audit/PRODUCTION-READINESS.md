@@ -21,7 +21,7 @@
 | # | Sujet | Verdict |
 |---|-------|---------|
 | 4 | Docker | **Corrigé le 2026-08-17** — multi-stage OK, non-root OK, pas de secret en dur OK, healthcheck API OK, healthcheck `web` ajouté (P-05), limites CPU/mémoire sur les 4 services ajoutées (P-04) |
-| 5 | CI/CD | Partiel — pipeline complet et **réellement vert sur GitHub Actions depuis le correctif du 2026-08-17** (run #6, P-10 : échouait à 100% des runs avant ça, jamais détecté) ; build Docker api/web ajouté en CI (P-02) ; SCA + scan de secrets + scan d'image tous bloquants (P-01 CORRIGÉ) ; **pas de SAST, pas de CD, pas de staging/E2E, protection de branche toujours non activée** (P-03 reste OUVERT) |
+| 5 | CI/CD | Partiel — pipeline complet et **réellement vert sur GitHub Actions depuis le correctif du 2026-08-17** (run #6, P-10 : échouait à 100% des runs avant ça, jamais détecté) ; build Docker api/web ajouté en CI (P-02) ; SCA + scan de secrets + scan d'image tous bloquants (P-01 CORRIGÉ) ; **protection de branche activée le 2026-08-22** (P-03 partiellement corrigé) ; **pas de SAST, pas de CD, pas de staging/E2E** (P-03 reste OUVERT sur ce volet) |
 | 6 | Backup/restore | Oui — chiffrement `age` réel (clé privée jamais sur le VPS), restauration réellement exercée avec preuve technique détaillée ; **RPO/RTO formalisés le 2026-08-17** (P-07), validation métier du chiffre encore à faire |
 | 7 | Logs + /health | **Corrigé le 2026-08-17** — corrélation `requestId`/`tenantId`/`userId` réelle et testée, pas de fuite de secret constatée, `/health/live` + `/health/ready` séparés (P-06) |
 | 8 | HTTPS/Caddy | Oui — HTTPS auto + redirection HTTP→HTTPS vérifiées (mode `tls internal`), CORS en liste blanche, helmet actif |
@@ -119,11 +119,18 @@ et vérifier son état actuel via `gh api repos/.../branches/main/protection`.
 **Priorité** : P1 (protection de branche — ne coûte rien, à faire
 immédiatement) / P3 (CD complet — dépend du provisioning VPS, hors
 périmètre code)
-**Statut** : OUVERT — vérifié le 2026-08-17 : `gh` n'est pas authentifié
-dans cet environnement (`gh auth status` → non connecté), impossible
-d'activer la protection de branche par API depuis ici. Reste à faire
-manuellement (GitHub → Settings → Branches) ou via `gh auth login` +
-`gh api repos/.../branches/main/protection` par un mainteneur habilité.
+**Statut** : PARTIEL — protection de branche **activée le 2026-08-22** via
+`gh api repos/libasse27/erp_gescom_compta_saas/branches/main/protection`
+(`gh` authentifié entretemps) : status check requis
+`typecheck · lint · build · test · test:tenant` (mode `strict`, branche
+doit être à jour), force-push et suppression de `main` interdits,
+appliqué y compris aux admins (`enforce_admins: true`), aucune revue de
+PR exigée (développeur solo à ce stade). Vérifié par lecture du retour de
+l'API après application, pas seulement supposé. **CD complet et étape
+staging/E2E toujours hors périmètre** : aucun VPS staging/prod réel
+provisionné (confirmé 2026-08-22), donc pas de job `deploy` ni de tests
+e2e/smoke automatisés — cf. `docs/deployment/CI-CD.md` §« Étendre vers un
+déploiement automatique ».
 
 ---
 
