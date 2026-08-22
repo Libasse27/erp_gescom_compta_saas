@@ -161,8 +161,9 @@ vrai fournisseur S3**.
 | Pare-feu VPS (22/80/443 uniquement) | 🟡 |
 | Conteneurs non-root (`nestjs`/`nextjs`, uid/gid 1001) | 🟢 — vérifié par lecture des Dockerfiles (`docs/audit/PRODUCTION-READINESS.md` §Ce qui est solide) |
 | `api`/`web`/`postgres` sans port publié sur l'hôte (seul Caddy expose 80/443) | 🟢 — vérifié par lecture de `docker-compose.prod.yml` et par test réel en local-test (connexion refusée sur les anciens ports) |
-| `helmet()` actif | 🟢 — `apps/api/src/main.ts:27` |
-| CORS liste blanche stricte (jamais `*`) | 🟢 — `apps/api/src/main.ts:31`, `env.corsAllowedOrigins()` |
+| `helmet()` actif | 🟢 — `apps/api/src/main.ts:50` |
+| CORS liste blanche stricte (jamais `*`) | 🟢 — `apps/api/src/main.ts:55`, `env.corsAllowedOrigins()` |
+| `trust proxy` activé derrière Caddy (SEC-05) | 🟢 — corrigé le 2026-08-22 (`apps/api/src/main.ts:48`), testé par `trust-proxy.integration.spec.ts` — sans lui, le rate limiting par IP et l'`ipAddress` du journal d'audit seraient faussés dès le premier trafic derrière Caddy |
 | Rate limiting global + `/auth/*` + webhooks paiement | 🟢 — `apps/api/src/common/rate-limit.ts`, testé (`auth-throttling.spec.ts`, `webhook-throttling.spec.ts`) |
 | Whitelist IP fournisseur webhook paiement | 🔴 — délibérément absente (`payments-webhook.controller.ts:14` : signature HMAC générique préférée à une liste d'IP, `docs/adr/0010-...`). **Pas un bug** mais à revalider une fois le(s) fournisseur(s) réel(s) intégré(s) — voir mémoire projet |
 | CSP/HSTS | 🟡 — fournis par les valeurs par défaut de `helmet()`, jamais auditées explicitement ni testées avec de vrais navigateurs sur un domaine HTTPS réel |
@@ -187,6 +188,13 @@ vrai fournisseur S3**.
 ---
 
 ## 10. Smoke test staging (à exécuter une fois le VPS provisionné)
+
+`scripts/smoke-test.sh` (P3, `docs/deployment/PRODUCTION.md` §Smoke test)
+automatise les deux contrôles minimaux (`/health/ready` = 200,
+endpoint métier authentifié = 2xx) après chaque déploiement — vérifié en
+local (succès nominal + 3 scénarios d'échec propres), jamais exécuté contre
+un VPS réel. Les étapes ci-dessous vont plus loin (parcours métier complet,
+pas seulement deux endpoints) et restent manuelles.
 
 Aucune étape ci-dessous n'a été exécutée sur staging réel — toutes 🟡 par
 construction. Ordre recommandé, chaque étape dépendant de la précédente :
