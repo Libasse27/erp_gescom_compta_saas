@@ -99,6 +99,113 @@ vérifié de bout en bout sur la stack Docker prod réelle :
 stratégie de rollback (résolution d'échec via
 `scripts/db-migrate-resolve-failed.sh`, ou roll-forward).
 
+## Mise à jour d'un déploiement existant (P3)
+
+La section « Premier déploiement » ci-dessus couvre un VPS neuf. Ce qui
+suit s'applique à un VPS déjà en service, code déjà cloné.
+
+**Point structurel à connaître avant de suivre cette procédure** :
+`docker-compose.prod.yml` n'a pas de clé `image:` pour `api`/`web` — chaque
+déploiement **reconstruit l'image localement** à partir du code source
+(`git pull`), il n'existe ni registre ni tag d'image versionné. Le
+`docker build` du CI (`.github/workflows/ci.yml`, P-02) est jetable, jamais
+publié — « CI vert » signifie « ce commit se construit et passe les tests »,
+pas « voici l'image qui tournera en production ». Un rollback applicatif
+revient donc à revenir à un **commit Git** puis reconstruire, jamais à
+« changer un tag d'image ».
+
+```bash
+git fetch
+git log <sha-actuellement-deployé>..<nouveau-sha>   # revue humaine : y a-t-il une migration incluse ?
+git tag pre-deploy-$(date +%Y%m%d-%H%M%S) HEAD       # marqueur de retour arrière, avant de bouger
+git pull
+scripts/prod-post-deploy.sh                          # migrate deploy — TOUJOURS avant de redémarrer api/web
+docker compose --env-file docker/.env.prod -f docker/docker-compose.prod.yml up -d --build api web
+scripts/smoke-test.sh --base-url https://<API_DOMAIN> --login-email <compte-de-test> --login-password <...>
+```
+
+L'ordre `migrate deploy` **avant** `up -d --build api/web` n'est pas
+optionnel : c'est ce qui garantit que l'API ne démarre jamais face à un
+schéma qu'elle ne connaît pas encore. `scripts/smoke-test.sh` (nouveau,
+voir ci-dessous) est la dernière étape — un déploiement qui n'a pas encore
+passé le smoke test n'est pas considéré terminé.
+
+## Rollback applicatif — ce que c'est, et ce que ce n'est pas
+
+**Une image Docker précédente n'est pas une sauvegarde de la base de
+données.** Revenir au code d'hier ne fait rien aux données d'aujourd'hui —
+si le problème vient des données (migration destructive, corruption), le
+rollback applicatif seul ne répare rien et peut aggraver la situation (code
+ancien écrivant dans un schéma qu'il ne comprend pas correctement).
+
+Trois notions distinctes, à ne jamais confondre :
+
+| | Rollback **applicatif** (code) | Rollback de **migration** | Restauration de **backup** |
+|---|---|---|---|
+| Portée | Revenir à un commit antérieur, reconstruire, redémarrer `api`/`web` | Débloquer/corriger `_prisma_migrations` (`scripts/db-migrate-resolve-failed.sh`) — jamais de DDL inverse automatique | Écraser les données depuis un dump (`scripts/db-restore.sh`) |
+| Documenté | Ci-dessous | `docs/deployment/MIGRATIONS.md` | `docs/deployment/BACKUPS.md` |
+| Répare une perte de données ? | **Non** | Non (Prisma ne génère pas de "down") | Oui, jusqu'au RPO (24h, voir BACKUPS.md) |
+
+### Quand un rollback applicatif seul est sûr — et quand il est interdit
+
+| Situation | Action |
+|---|---|
+| Nouveau code, aucune migration appliquée depuis le déploiement précédent | 🟢 rollback vers le commit précédent : `git checkout pre-deploy-<horodatage>`, rebuild, restart |
+| Migration additive appliquée (nouvelle colonne/table optionnelle) et le code précédent l'ignore sans erreur | 🟢 rollback possible **après vérification manuelle** que l'ancien code ne dépend d'aucun objet ajouté |
+| Migration destructive ou incompatible (colonne supprimée/renommée, contrainte `NOT NULL` ajoutée, type changé) | 🔴 rollback applicatif seul **interdit** — le code précédent ne comprend pas le schéma actuel. Écrire une migration corrective (roll-forward) avant tout retour en arrière du code |
+| Migration en échec au déploiement (`P3018`) | 🔴 arrêter, diagnostiquer via `docs/deployment/MIGRATIONS.md` (niveau 1) — jamais redémarrer `api` avant résolution |
+| Données corrompues ou perdues | 🔴 restauration de backup selon `docs/deployment/BACKUPS.md`, jamais un rollback de code seul |
+
+### Procédure de rollback applicatif (cas sûr uniquement)
+
+```bash
+git checkout pre-deploy-<horodatage>          # tag posé avant le déploiement problématique
+docker compose --env-file docker/.env.prod -f docker/docker-compose.prod.yml up -d --build api web
+scripts/smoke-test.sh --base-url https://<API_DOMAIN> --login-email <compte-de-test> --login-password <...>
+git checkout main                              # revenir sur la branche après vérification
+```
+
+### Conteneur qui ne démarre pas, ou démarre mais reste `unhealthy`
+
+`restart: unless-stopped` (tous les services, `docker-compose.prod.yml`)
+redémarre un conteneur qui **crashe** (boucle si l'erreur persiste), mais
+ne fait **rien** pour un conteneur qui démarre et reste `unhealthy` — Docker
+Compose hors mode Swarm n'agit pas sur l'état de healthcheck. Un
+déploiement dont les conteneurs affichent `Up` n'est donc pas
+nécessairement sain :
+
+```bash
+docker compose --env-file docker/.env.prod -f docker/docker-compose.prod.yml ps   # colonne STATUS : Up ≠ healthy
+docker compose --env-file docker/.env.prod -f docker/docker-compose.prod.yml logs api
+```
+
+## Smoke test (`scripts/smoke-test.sh`)
+
+Deux contrôles obligatoires, aucun ne se fie au seul code de sortie de
+`curl` (qui reste 0 même sur une réponse 404/500 sans l'option `-f`) — le
+code HTTP est toujours extrait explicitement (`-w '%{http_code}'`) et
+comparé :
+
+1. `GET /health/ready` doit répondre **exactement** `200` (pas
+   `/health/live`, qui ne vérifie aucune dépendance et ne détecterait pas
+   une panne Postgres — P-06).
+2. Un endpoint métier authentifié (`/v1/auth/me` par défaut, override via
+   `--business-path`) doit répondre `2xx` — preuve que JWT, `TenantContext`
+   et RLS fonctionnent de bout en bout, pas seulement que Postgres répond à
+   `SELECT 1`.
+
+Échec de l'un ou l'autre → code de sortie `1`. Voir
+`scripts/smoke-test.sh --help` pour les options (authentification par
+`--token` déjà obtenu, ou `--login-email`/`--login-password`).
+
+**Vérifié en local** (stack `pnpm dev` réelle, pas simulée) : succès
+nominal (200 + 2xx, exit 0), puis trois scénarios d'échec confirmés propres
+(exit 1 avec message explicite, jamais un plantage brut) — mauvais mot de
+passe (401 au login), endpoint métier inexistant (404), et hôte injoignable
+(`curl` échoue, code rapporté `000` plutôt que de faire avorter le script
+sous `set -e`). **Non vérifié** : exécution contre un VPS staging réel
+(aucun VPS provisionné à ce jour, voir `docs/deployment/STAGING.md`).
+
 ## Sauvegardes
 
 `docs/deployment/BACKUPS.md` — `scripts/db-backup.sh`/`scripts/db-restore.sh`,
