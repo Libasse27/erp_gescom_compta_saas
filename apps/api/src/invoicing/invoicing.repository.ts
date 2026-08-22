@@ -114,59 +114,59 @@ export class InvoicingRepository {
     input: CreateSalesInvoiceInput,
     idempotencyKey?: string,
   ): Promise<CreateSalesInvoiceResult> {
-    return this.tenantPrisma.run(async (tx) => {
-      // Corrige MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...). Vérifié avant
-      // la contrainte "une facture par vente" ci-dessous : un rejeu portant
-      // la même clé doit renvoyer la facture déjà émise, jamais l'erreur
-      // "Cette vente est déjà facturée" (qui reste le comportement correct
-      // pour une seconde tentative de facturation sans la même clé).
-      if (idempotencyKey) {
-        const existingByKey = await tx.salesInvoice.findFirst({
-          where: { enterpriseId, idempotencyKey },
-          include: { sale: { include: { lines: { include: { product: true } }, customer: true } } },
-        });
-        if (existingByKey) {
-          return { view: this.toInvoiceView(existingByKey, existingByKey.sale), created: false };
+    try {
+      return await this.tenantPrisma.run(async (tx) => {
+        // Corrige MOBILE AUDIT-001/ERP-001 (docs/adr/0019-...). Vérifié avant
+        // la contrainte "une facture par vente" ci-dessous : un rejeu portant
+        // la même clé doit renvoyer la facture déjà émise, jamais l'erreur
+        // "Cette vente est déjà facturée" (qui reste le comportement correct
+        // pour une seconde tentative de facturation sans la même clé).
+        if (idempotencyKey) {
+          const existingByKey = await tx.salesInvoice.findFirst({
+            where: { enterpriseId, idempotencyKey },
+            include: { sale: { include: { lines: { include: { product: true } }, customer: true } } },
+          });
+          if (existingByKey) {
+            return { view: this.toInvoiceView(existingByKey, existingByKey.sale), created: false };
+          }
         }
-      }
 
-      const sale = await tx.sale.findUnique({
-        where: { id: input.saleId },
-        include: { lines: { include: { product: true } }, customer: true },
-      });
+        const sale = await tx.sale.findUnique({
+          where: { id: input.saleId },
+          include: { lines: { include: { product: true } }, customer: true },
+        });
 
-      // 404 pas 403 (même raisonnement que SalesRepository) : pas de fuite
-      // d'information sur l'existence d'une vente d'un autre tenant.
-      if (!sale || sale.enterpriseId !== enterpriseId) {
-        throw new NotFoundException("Vente introuvable");
-      }
-      if (sale.status !== "CONFIRMED") {
-        throw new BadRequestException("Seule une vente confirmée peut être facturée");
-      }
+        // 404 pas 403 (même raisonnement que SalesRepository) : pas de fuite
+        // d'information sur l'existence d'une vente d'un autre tenant.
+        if (!sale || sale.enterpriseId !== enterpriseId) {
+          throw new NotFoundException("Vente introuvable");
+        }
+        if (sale.status !== "CONFIRMED") {
+          throw new BadRequestException("Seule une vente confirmée peut être facturée");
+        }
 
-      const existing = await tx.salesInvoice.findUnique({ where: { saleId: sale.id } });
-      if (existing) {
-        throw new ConflictException("Cette vente est déjà facturée");
-      }
+        const existing = await tx.salesInvoice.findUnique({ where: { saleId: sale.id } });
+        if (existing) {
+          throw new ConflictException("Cette vente est déjà facturée");
+        }
 
-      const enterprise = await tx.enterprise.findUniqueOrThrow({ where: { id: enterpriseId } });
+        const enterprise = await tx.enterprise.findUniqueOrThrow({ where: { id: enterpriseId } });
 
-      // Numérotation séquentielle par tenant, sans trou, résistante à la
-      // concurrence — même patron qu'InvoiceGenerationService
-      // (apps/api/src/payments/invoice-generation.service.ts), compteur
-      // dédié (SalesInvoiceCounter) distinct d'InvoiceCounter (facturation
-      // SaaS plateforme).
-      const rows = await tx.$queryRaw<{ last_number: number }[]>`
-        INSERT INTO sales_invoice_counters (enterprise_id, last_number, updated_at)
-        VALUES (${enterpriseId}::uuid, 1, now())
-        ON CONFLICT (enterprise_id)
-        DO UPDATE SET last_number = sales_invoice_counters.last_number + 1, updated_at = now()
-        RETURNING last_number
-      `;
-      const sequenceNumber = rows[0]!.last_number;
-      const number = `FACT-${enterpriseId.slice(0, 8).toUpperCase()}-${String(sequenceNumber).padStart(6, "0")}`;
+        // Numérotation séquentielle par tenant, sans trou, résistante à la
+        // concurrence — même patron qu'InvoiceGenerationService
+        // (apps/api/src/payments/invoice-generation.service.ts), compteur
+        // dédié (SalesInvoiceCounter) distinct d'InvoiceCounter (facturation
+        // SaaS plateforme).
+        const rows = await tx.$queryRaw<{ last_number: number }[]>`
+          INSERT INTO sales_invoice_counters (enterprise_id, last_number, updated_at)
+          VALUES (${enterpriseId}::uuid, 1, now())
+          ON CONFLICT (enterprise_id)
+          DO UPDATE SET last_number = sales_invoice_counters.last_number + 1, updated_at = now()
+          RETURNING last_number
+        `;
+        const sequenceNumber = rows[0]!.last_number;
+        const number = `FACT-${enterpriseId.slice(0, 8).toUpperCase()}-${String(sequenceNumber).padStart(6, "0")}`;
 
-      try {
         const invoice = await tx.salesInvoice.create({
           data: {
             enterpriseId,
@@ -178,50 +178,64 @@ export class InvoicingRepository {
         });
 
         return { view: this.toInvoiceView(invoice, sale), created: true };
-      } catch (error) {
-        // Corrige BIL-23 (docs/audit/BILLING-AUDIT.md) : le check TOCTOU
-        // ci-dessus (`existing = await tx.salesInvoice.findUnique(...)`) ne
-        // protège pas une vraie course concurrente — deux créations quasi
-        // simultanées pour la même vente, sans Idempotency-Key (en-tête
-        // optionnel, voir invoicing.controller.ts), peuvent toutes deux
-        // dépasser ce check.
-        //
-        // Sous contention réelle, l'échec de cet INSERT peut remonter sous
-        // plusieurs formes Prisma selon le timing exact — pas seulement
-        // P2002 (violation de la contrainte unique `sale_id`) mais aussi,
-        // par exemple, P2028 (timeout de la transaction interactive,
-        // atteint pendant l'attente du verrou posé par le concurrent qui
-        // gagne la course sur `sales_invoice_counters` — observé sur CI,
-        // jamais reproduit en local même à 8 requêtes concurrentes,
-        // cohérent avec un runner plus lent/chargé). Énumérer les codes
-        // Prisma possibles sous contention serait fragile et
-        // structurellement incomplet. On vérifie donc l'état réel en base :
-        // si une facture correspondante existe désormais, c'est la preuve
-        // directe qu'une requête concurrente a gagné, quelle que soit la
-        // raison exacte de l'échec de notre propre tentative — jamais
-        // l'inverse : si aucune facture correspondante n'existe, l'erreur
-        // originale est relancée telle quelle (jamais de conversion
-        // arbitraire d'un timeout, d'une panne Postgres ou d'une autre
-        // erreur en 409 métier).
-        if (error instanceof Prisma.PrismaClientKnownRequestError) {
-          if (idempotencyKey) {
-            const existingByKey = await tx.salesInvoice.findFirst({
+      });
+    } catch (error) {
+      // Corrige BIL-23 (docs/audit/BILLING-AUDIT.md) : le check TOCTOU
+      // ci-dessus (`existing = await tx.salesInvoice.findUnique(...)`) ne
+      // protège pas une vraie course concurrente — deux créations quasi
+      // simultanées pour la même vente, sans Idempotency-Key (en-tête
+      // optionnel, voir invoicing.controller.ts), peuvent toutes deux
+      // dépasser ce check.
+      //
+      // Sous contention réelle, l'échec de l'INSERT final peut remonter sous
+      // plusieurs formes Prisma selon le timing exact — pas seulement P2002
+      // (violation de la contrainte unique `sale_id`) mais aussi, observé
+      // sur CI (jamais reproduit en local même à 8 requêtes concurrentes,
+      // cohérent avec un runner plus lent/chargé) : P2028
+      // (`PrismaClientKnownRequestError`, timeout de la transaction
+      // interactive atteint en attendant le verrou posé par le concurrent
+      // qui gagne la course sur `sales_invoice_counters`) et une
+      // `PrismaClientUnknownRequestError` (transaction/connexion dans un
+      // état que le moteur Prisma ne mappe à aucun code connu). Énumérer
+      // les codes Prisma possibles sous contention serait fragile et
+      // structurellement incomplet — seules ces deux classes d'erreur
+      // Prisma "quelque chose a réellement échoué côté base" déclenchent
+      // une vérification ; jamais `PrismaClientValidationError` (bug de
+      // notre propre code, pas une course) ni une erreur applicative déjà
+      // levée ci-dessus (NotFoundException/BadRequestException/
+      // ConflictException du check TOCTOU).
+      //
+      // Point critique : la transaction qui vient d'échouer peut être dans
+      // un état invalide/fermé (le message P2028 est explicitement
+      // "Transaction already closed") — toute vérification doit donc passer
+      // par un NOUVEL appel à `tenantPrisma.run()` (nouvelle transaction,
+      // nouvelle connexion), jamais réutiliser le `tx` défaillant.
+      if (error instanceof Prisma.PrismaClientKnownRequestError || error instanceof Prisma.PrismaClientUnknownRequestError) {
+        if (idempotencyKey) {
+          const existingByKey = await this.tenantPrisma.run((freshTx) =>
+            freshTx.salesInvoice.findFirst({
               where: { enterpriseId, idempotencyKey },
               include: { sale: { include: { lines: { include: { product: true } }, customer: true } } },
-            });
-            if (existingByKey) {
-              return { view: this.toInvoiceView(existingByKey, existingByKey.sale), created: false };
-            }
-          }
-
-          const existingBySale = await tx.salesInvoice.findUnique({ where: { saleId: sale.id } });
-          if (existingBySale) {
-            throw new ConflictException("Cette vente est déjà facturée");
+            }),
+          );
+          if (existingByKey) {
+            return { view: this.toInvoiceView(existingByKey, existingByKey.sale), created: false };
           }
         }
-        throw error;
+
+        // Si aucune facture correspondante n'existe réellement, l'erreur
+        // originale est relancée telle quelle plus bas — jamais de
+        // conversion arbitraire d'un timeout, d'une panne Postgres ou d'une
+        // autre erreur en 409 métier.
+        const existingBySale = await this.tenantPrisma.run((freshTx) =>
+          freshTx.salesInvoice.findUnique({ where: { saleId: input.saleId } }),
+        );
+        if (existingBySale) {
+          throw new ConflictException("Cette vente est déjà facturée");
+        }
       }
-    });
+      throw error;
+    }
   }
 
   async findMany(enterpriseId: string, query: ListSalesInvoicesQuery): Promise<SalesInvoiceListResult> {

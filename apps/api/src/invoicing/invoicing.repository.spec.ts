@@ -256,30 +256,30 @@ describe("InvoicingRepository", () => {
     expect(invoices).toHaveLength(1);
   });
 
-  // Régression BIL-23 : preuve déterministe (pas de vraie concurrence
+  // Régression BIL-23 : preuves déterministes (pas de vraie concurrence
   // temporisée, non reproductible de façon fiable) que la conversion en 409
   // dépend de l'état réel en base, pas d'un pattern-matching sur un code
-  // d'erreur Prisma précis. Ici l'erreur simulée (P2028, code arbitraire
-  // sans rapport avec une contrainte réelle) n'a normalement rien à voir
-  // avec "sale_id" ni "idempotency_key" — seule la présence d'une facture
-  // concurrente pour cette vente justifie la conversion.
-  it("converts a simulated write error into the business 409 only because a matching invoice now exists", async () => {
-    const enterprise = await createEnterprise();
-    const sale = await createConfirmedSale(enterprise.id);
-
-    const simulatedError = new Prisma.PrismaClientKnownRequestError(
-      "Transaction API error: Transaction already closed: The timeout for this transaction was exceeded.",
-      { code: "P2028", clientVersion: "test" },
-    );
-
-    // 1er appel findUnique : check TOCTOU (aucune facture concurrente encore
-    // visible). 2e appel : re-vérification dans le catch, après l'échec
-    // simulé de l'écriture — c'est là qu'une facture "concurrente" apparaît.
-    const findUniqueMock = jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "concurrent-invoice-id" });
+  // d'erreur Prisma précis. La vérification de récupération passe par un
+  // NOUVEL appel à `tenantPrisma.run()` (nouvelle transaction), jamais le
+  // `tx` défaillant — sinon la lecture de récupération s'exécuterait dans un
+  // contexte potentiellement invalide/fermé (le message P2028 réel est
+  // explicitement "Transaction already closed").
+  //
+  // `buildFakeRepository` simule : le premier appel à `run()` (tentative de
+  // création réelle, déléguant les lectures sale/enterprise au vrai Prisma
+  // pour des données réalistes) échoue avec `simulatedError` ; tout appel
+  // suivant à `run()` (récupération) passe par un tx séparé dont
+  // `salesInvoice.findFirst`/`findUnique` renvoient les valeurs fournies —
+  // jamais le tx de la tentative échouée.
+  function buildFakeRepository(
+    simulatedError: unknown,
+    recovery: { byIdempotencyKey?: unknown; bySaleId: unknown },
+  ) {
+    const findUniqueMock = jest.fn().mockResolvedValueOnce(null); // check TOCTOU : aucune facture encore visible
     const findFirstMock = jest.fn();
     const createMock = jest.fn().mockRejectedValue(simulatedError);
 
-    const fakeTx = {
+    const creationTx = {
       sale: { findUnique: (args: Parameters<typeof prisma.sale.findUnique>[0]) => prisma.sale.findUnique(args) },
       enterprise: {
         findUniqueOrThrow: (args: Parameters<typeof prisma.enterprise.findUniqueOrThrow>[0]) =>
@@ -289,18 +289,78 @@ describe("InvoicingRepository", () => {
       $queryRaw: jest.fn().mockResolvedValue([{ last_number: 1 }]),
     } as unknown as Prisma.TransactionClient;
 
-    const fakeTenantPrisma = {
-      run: (callback: (tx: Prisma.TransactionClient) => Promise<unknown>) => callback(fakeTx),
-    } as unknown as TenantScopedPrismaService;
+    const recoveryTx = {
+      salesInvoice: {
+        findFirst: jest.fn().mockResolvedValue(recovery.byIdempotencyKey ?? null),
+        findUnique: jest.fn().mockResolvedValue(recovery.bySaleId),
+      },
+    } as unknown as Prisma.TransactionClient;
 
+    const runMock = jest
+      .fn()
+      .mockImplementationOnce((callback: (tx: Prisma.TransactionClient) => Promise<unknown>) => callback(creationTx))
+      .mockImplementation((callback: (tx: Prisma.TransactionClient) => Promise<unknown>) => callback(recoveryTx));
+
+    const fakeTenantPrisma = { run: runMock } as unknown as TenantScopedPrismaService;
     const fakeRepository = new InvoicingRepository(fakeTenantPrisma);
 
+    return { fakeRepository, createMock, runMock, recoveryTx };
+  }
+
+  it("converts a simulated PrismaClientKnownRequestError into the business 409 only because a matching invoice now exists", async () => {
+    const enterprise = await createEnterprise();
+    const sale = await createConfirmedSale(enterprise.id);
+
+    const simulatedError = new Prisma.PrismaClientKnownRequestError(
+      "Transaction API error: Transaction already closed: The timeout for this transaction was exceeded.",
+      { code: "P2028", clientVersion: "test" },
+    );
+    const { fakeRepository, createMock } = buildFakeRepository(simulatedError, { bySaleId: { id: "concurrent-invoice-id" } });
+
     await expect(fakeRepository.create(enterprise.id, { saleId: sale.id })).rejects.toThrow(ConflictException);
-    // Pas de clé d'idempotence fournie : la branche findFirst (idempotencyKey)
-    // ne doit jamais être atteinte, seule la branche saleId doit l'être.
-    expect(findFirstMock).not.toHaveBeenCalled();
     expect(createMock).toHaveBeenCalledTimes(1);
-    expect(findUniqueMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("converts a simulated PrismaClientUnknownRequestError into the business 409 only because a matching invoice now exists", async () => {
+    const enterprise = await createEnterprise();
+    const sale = await createConfirmedSale(enterprise.id);
+
+    const simulatedError = new Prisma.PrismaClientUnknownRequestError("Unknown transport-level failure", { clientVersion: "test" });
+    const { fakeRepository } = buildFakeRepository(simulatedError, { bySaleId: { id: "concurrent-invoice-id" } });
+
+    await expect(fakeRepository.create(enterprise.id, { saleId: sale.id })).rejects.toThrow(ConflictException);
+  });
+
+  it("re-throws a simulated PrismaClientUnknownRequestError unchanged when no matching invoice exists", async () => {
+    const enterprise = await createEnterprise();
+    const sale = await createConfirmedSale(enterprise.id);
+
+    const simulatedError = new Prisma.PrismaClientUnknownRequestError("Unknown transport-level failure", { clientVersion: "test" });
+    // Aucune facture concurrente pour ni idempotencyKey ni saleId : rien ne
+    // prouve qu'une requête concurrente a gagné, l'erreur d'origine doit
+    // remonter telle quelle — jamais convertie en 409 par défaut.
+    const { fakeRepository } = buildFakeRepository(simulatedError, { bySaleId: null });
+
+    await expect(fakeRepository.create(enterprise.id, { saleId: sale.id })).rejects.toBe(simulatedError);
+  });
+
+  it("never attempts recovery for a PrismaClientValidationError — re-thrown unchanged, no extra run() call", async () => {
+    const enterprise = await createEnterprise();
+    const sale = await createConfirmedSale(enterprise.id);
+
+    const simulatedError = new Prisma.PrismaClientValidationError("Invalid `salesInvoice.create()` invocation", {
+      clientVersion: "test",
+    });
+    // recovery.bySaleId volontairement truthy : si le code interceptait
+    // cette erreur à tort, il la convertirait en 409 — ce test prouve qu'il
+    // ne le fait pas, PrismaClientValidationError signale un bug de notre
+    // propre code, jamais une course concurrente.
+    const { fakeRepository, runMock } = buildFakeRepository(simulatedError, { bySaleId: { id: "unrelated-invoice-id" } });
+
+    await expect(fakeRepository.create(enterprise.id, { saleId: sale.id })).rejects.toBe(simulatedError);
+    // Un seul appel à run() (la tentative de création) — aucun appel de
+    // récupération n'a dû être déclenché.
+    expect(runMock).toHaveBeenCalledTimes(1);
   });
 
   it("throws NotFoundException when reading an invoice that belongs to another enterprise", async () => {
