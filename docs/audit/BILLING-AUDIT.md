@@ -7,6 +7,8 @@
 > `apps/api/src/entitlements/`, `apps/api/prisma/schema.prisma` (modèles Plan,
 > Feature, Limit, Subscription, Payment, Invoice, InvoiceCounter, OnboardingState),
 > `packages/validation/src/payments.ts`, et les tests associés.
+> Périmètre étendu le 2026-08-22 à `apps/api/src/invoicing/` (BIL-23) — angle mort
+> de la déclaration initiale, qui ne couvrait que les modèles Prisma associés.
 >
 > Méthode : lecture du code réel et des tests. Les ADR (`0003`, `0005`, `0010`) et
 > les messages de commit ont été traités comme des **déclarations d'intention à
@@ -20,10 +22,14 @@
 |----------|--------|
 | CRITICAL | 0 |
 | HIGH     | 5 |
-| MEDIUM   | 9 |
+| MEDIUM   | 10 |
 | LOW      | 5 |
 | INFO     | 3 |
-| **Total**| **22** |
+| **Total**| **23** |
+
+BIL-23 (2026-08-22, ajouté après extension de périmètre à `apps/api/src/invoicing/`,
+corrigé le jour même) : course concurrente non protégée sur la création de facture
+sans en-tête `Idempotency-Key` — voir §3 pour le détail.
 
 Aucune faille d'isolation inter-tenant ni de contournement d'authentification n'a été
 trouvée sur ce périmètre : la chaîne JWT → `TenantContext` → RLS est correctement
@@ -1228,6 +1234,85 @@ et écrit sur stdout (BIL-11).
   fournisseurs de paiement sur un webhook en échec. Aucune valeur de secret
   réelle n'apparaît nulle part dans la documentation. Aucun fichier de code
   applicatif, aucune migration, aucun changement CI.
+
+### BIL-23
+
+- **Sévérité** : MEDIUM
+- **Composant** : `apps/api/src/invoicing/invoicing.repository.ts` (hors périmètre
+  initial de cet audit — ajouté le 2026-08-22, voir note de périmètre ci-dessous)
+- **Description** : la protection contre la double facturation d'une vente repose sur
+  deux mécanismes : (1) un `findUnique({ where: { saleId } })` lu avant l'écriture
+  (vulnérable TOCTOU par construction), et (2) une contrainte unique DB sur `sale_id`
+  qui fait échouer un second `INSERT` concurrent avec `P2002`. Le `catch` ne traitait ce
+  `P2002` que si `idempotencyKey` était fourni — patron hérité de l'ADR-0019, conçu pour
+  la resynchronisation mobile hors-ligne où une clé est toujours présente. Or l'en-tête
+  `Idempotency-Key` est optionnel côté contrôleur (`invoicing.controller.ts:59`), et
+  l'ADR-0019 assume explicitement que le web « n'a pas ce problème en ligne stable » —
+  hypothèse non vérifiée par un test.
+- **Impact** : deux requêtes `POST /invoices` quasi simultanées pour la même vente,
+  sans `Idempotency-Key` (double-clic, double onglet, retry réseau) : la seconde
+  déclenchait un `P2002` non intercepté, remontant tel quel jusqu'au filtre
+  d'exception Nest par défaut (aucun filtre personnalisé dans ce projet,
+  `app.module.ts:82-88`) — réponse `500` générique au lieu du `409 "Cette vente est
+  déjà facturée"` attendu. Nest sanitise la réponse (pas de fuite du détail Prisma) :
+  aucune fuite d'information, aucune donnée corrompue ou dupliquée (la contrainte DB
+  protégeait déjà réellement l'intégrité) — défaut de qualité d'erreur, pas
+  d'intégrité.
+- **Risque** : `500` inattendu sur un flux financier pouvant déclencher une
+  re-tentative client inutile ou une alerte Sentry non pertinente une fois activée. Le
+  même patron (`if (idempotencyKey && ...P2002)`) existe à l'identique dans
+  `sales.repository.ts`, `purchases.repository.ts`, `stock.repository.ts`,
+  `journal.repository.ts` — hors périmètre de cet audit (facturation/paiement
+  uniquement), même cause structurelle si le scénario s'y reproduit.
+- **Fichier(s)** : `apps/api/src/invoicing/invoicing.repository.ts:147-150,181-193`,
+  `apps/api/src/invoicing/invoicing.controller.ts:59`.
+- **Solution** : sur tout échec Prisma (`PrismaClientKnownRequestError` ou
+  `PrismaClientUnknownRequestError` — jamais `PrismaClientValidationError`, qui
+  signale un bug de notre propre code, pas une course) de cet `INSERT`, ne jamais
+  présumer la cause à partir du seul code d'erreur — sous contention réelle,
+  l'échec peut remonter sous plusieurs formes selon le timing exact. Vérifier
+  plutôt l'état réel en base après l'échec, via un **nouvel appel**
+  `tenantPrisma.run()` (nouvelle transaction, jamais le `tx` défaillant — un
+  `P2028` signifie explicitement que la transaction est déjà fermée, la
+  réutiliser pour une lecture serait invalide) : si une facture correspondante
+  (`idempotencyKey`, puis `saleId`) existe désormais, c'est la preuve directe
+  qu'une requête concurrente a gagné, quelle que soit la raison exacte de
+  l'échec ; sinon, relancer l'erreur originale telle quelle (jamais de conversion
+  arbitraire d'un timeout ou d'une panne Postgres en 409 métier).
+- **Priorité** : P2
+- **Statut** : CORRIGÉ (2026-08-22) — deux itérations, chacune invalidée par un
+  run CI réel avant la version finale :
+  1. Version 1 (`error.meta.target`, `P2002` uniquement) validée en local mais
+     **a échoué sur CI** : le runner, plus lent/chargé, a fait remonter un
+     `P2028` (timeout de transaction) que ce filtrage ne couvrait pas.
+  2. Version 2 (tout `PrismaClientKnownRequestError`, recovery via le `tx`
+     déjà en échec) a de nouveau **échoué sur CI**, cette fois avec une
+     `PrismaClientUnknownRequestError` — une classe distincte, jamais une
+     sous-classe de `PrismaClientKnownRequestError`, donc non interceptée.
+  3. Version finale : élargie à `PrismaClientKnownRequestError` **et**
+     `PrismaClientUnknownRequestError` ; la vérification de récupération passe
+     désormais par un **nouvel appel** `tenantPrisma.run()` plutôt que par le
+     `tx` de la tentative échouée (point relevé explicitement avant
+     implémentation : une lecture sur une transaction déjà fermée serait
+     invalide). Six tests de non-régression dans `invoicing.repository.spec.ts` :
+     course concurrente réelle (`Promise.allSettled`, sans `Idempotency-Key` →
+     exactement 1×201 + 1×409, une seule facture — c'est ce test, exécuté sur
+     CI, qui a révélé les deux formes d'erreur non couvertes par les versions
+     1 et 2), `Idempotency-Key` existante (comportement idempotent inchangé,
+     revérifié), et quatre scénarios déterministes avec erreurs Prisma
+     simulées : `PrismaClientKnownRequestError` + facture existante → 409,
+     `PrismaClientUnknownRequestError` + facture existante → 409,
+     `PrismaClientUnknownRequestError` + aucune facture → erreur originale
+     propagée, `PrismaClientValidationError` → erreur originale propagée sans
+     aucune tentative de récupération. `sales`/`purchases`/`stock`/`journal`
+     volontairement non modifiés (hors périmètre), ADR-0019 non modifiée (son
+     mécanisme reste valide), aucun changement à `TenantScopedPrismaService`
+     ni aux paramètres globaux Prisma, aucune migration, aucun changement CI.
+
+**Note de périmètre** : `apps/api/src/invoicing/` n'était pas dans le périmètre
+initial déclaré de cet audit (ligne 5-9 ci-dessus ne couvre que les modèles Prisma
+`Invoice`/`InvoiceCounter`, pas le module `invoicing/`) — angle mort de portée
+corrigé par ce finding, périmètre étendu en conséquence pour les futures révisions.
 
 ---
 
