@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { RawDbClient } from "../prisma/raw-db-client";
 import { TenantContext } from "../tenant/tenant-context";
@@ -228,10 +229,12 @@ describe("InvoicingRepository", () => {
   // Régression BIL-23 (docs/audit/BILLING-AUDIT.md) : deux créations
   // réellement concurrentes (Promise.all, pas séquentielles) pour la même
   // vente, sans Idempotency-Key — le check TOCTOU ne suffit pas à lui seul
-  // à empêcher les deux requêtes de dépasser la lecture ; c'est la
-  // contrainte unique `sale_id` qui tranche. Avant le correctif, la
-  // requête perdante recevait le P2002 brut (non intercepté sans clé) au
-  // lieu du ConflictException métier.
+  // à empêcher les deux requêtes de dépasser la lecture. Sous contention
+  // réelle, l'échec de l'INSERT perdant peut remonter sous plusieurs formes
+  // Prisma selon le timing exact (P2002 le plus souvent en local, P2028
+  // observé sur CI sous contention plus forte — voir invoicing.repository.ts) :
+  // ce test ne présume donc pas laquelle, il vérifie seulement le résultat
+  // métier attendu dans tous les cas.
   it("resolves a genuine concurrent race without an idempotency key into exactly one success and one 409, never a raw error", async () => {
     const enterprise = await createEnterprise();
     const sale = await createConfirmedSale(enterprise.id);
@@ -251,6 +254,53 @@ describe("InvoicingRepository", () => {
 
     const invoices = await prisma.salesInvoice.findMany({ where: { enterpriseId: enterprise.id } });
     expect(invoices).toHaveLength(1);
+  });
+
+  // Régression BIL-23 : preuve déterministe (pas de vraie concurrence
+  // temporisée, non reproductible de façon fiable) que la conversion en 409
+  // dépend de l'état réel en base, pas d'un pattern-matching sur un code
+  // d'erreur Prisma précis. Ici l'erreur simulée (P2028, code arbitraire
+  // sans rapport avec une contrainte réelle) n'a normalement rien à voir
+  // avec "sale_id" ni "idempotency_key" — seule la présence d'une facture
+  // concurrente pour cette vente justifie la conversion.
+  it("converts a simulated write error into the business 409 only because a matching invoice now exists", async () => {
+    const enterprise = await createEnterprise();
+    const sale = await createConfirmedSale(enterprise.id);
+
+    const simulatedError = new Prisma.PrismaClientKnownRequestError(
+      "Transaction API error: Transaction already closed: The timeout for this transaction was exceeded.",
+      { code: "P2028", clientVersion: "test" },
+    );
+
+    // 1er appel findUnique : check TOCTOU (aucune facture concurrente encore
+    // visible). 2e appel : re-vérification dans le catch, après l'échec
+    // simulé de l'écriture — c'est là qu'une facture "concurrente" apparaît.
+    const findUniqueMock = jest.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "concurrent-invoice-id" });
+    const findFirstMock = jest.fn();
+    const createMock = jest.fn().mockRejectedValue(simulatedError);
+
+    const fakeTx = {
+      sale: { findUnique: (args: Parameters<typeof prisma.sale.findUnique>[0]) => prisma.sale.findUnique(args) },
+      enterprise: {
+        findUniqueOrThrow: (args: Parameters<typeof prisma.enterprise.findUniqueOrThrow>[0]) =>
+          prisma.enterprise.findUniqueOrThrow(args),
+      },
+      salesInvoice: { findUnique: findUniqueMock, findFirst: findFirstMock, create: createMock },
+      $queryRaw: jest.fn().mockResolvedValue([{ last_number: 1 }]),
+    } as unknown as Prisma.TransactionClient;
+
+    const fakeTenantPrisma = {
+      run: (callback: (tx: Prisma.TransactionClient) => Promise<unknown>) => callback(fakeTx),
+    } as unknown as TenantScopedPrismaService;
+
+    const fakeRepository = new InvoicingRepository(fakeTenantPrisma);
+
+    await expect(fakeRepository.create(enterprise.id, { saleId: sale.id })).rejects.toThrow(ConflictException);
+    // Pas de clé d'idempotence fournie : la branche findFirst (idempotencyKey)
+    // ne doit jamais être atteinte, seule la branche saleId doit l'être.
+    expect(findFirstMock).not.toHaveBeenCalled();
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(findUniqueMock).toHaveBeenCalledTimes(2);
   });
 
   it("throws NotFoundException when reading an invoice that belongs to another enterprise", async () => {

@@ -184,25 +184,27 @@ export class InvoicingRepository {
         // protège pas une vraie course concurrente — deux créations quasi
         // simultanées pour la même vente, sans Idempotency-Key (en-tête
         // optionnel, voir invoicing.controller.ts), peuvent toutes deux
-        // dépasser ce check et se disputer la contrainte unique `sale_id`.
-        // Avant ce correctif, seul un P2002 accompagné d'une clé
-        // d'idempotence était intercepté (patron ADR-0019, conçu pour la
-        // resynchronisation mobile où une clé est toujours présente) — un
-        // P2002 sur `sale_id` sans clé remontait tel quel (500 générique
-        // côté client, jamais le 409 métier prévu). `error.meta.target`
-        // identifie la contrainte réellement violée (vérifié empiriquement :
-        // Prisma 5.20/Postgres renvoie les noms de colonnes DB, ex.
-        // `["sale_id"]`) — jamais une simple présence de `idempotencyKey`,
-        // qui confondrait à tort un conflit sur une autre contrainte avec
-        // "cette vente est déjà facturée".
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-          const target = Array.isArray(error.meta?.target) ? (error.meta.target as string[]) : [];
-
-          if (target.includes("sale_id")) {
-            throw new ConflictException("Cette vente est déjà facturée");
-          }
-
-          if (idempotencyKey && target.includes("idempotency_key")) {
+        // dépasser ce check.
+        //
+        // Sous contention réelle, l'échec de cet INSERT peut remonter sous
+        // plusieurs formes Prisma selon le timing exact — pas seulement
+        // P2002 (violation de la contrainte unique `sale_id`) mais aussi,
+        // par exemple, P2028 (timeout de la transaction interactive,
+        // atteint pendant l'attente du verrou posé par le concurrent qui
+        // gagne la course sur `sales_invoice_counters` — observé sur CI,
+        // jamais reproduit en local même à 8 requêtes concurrentes,
+        // cohérent avec un runner plus lent/chargé). Énumérer les codes
+        // Prisma possibles sous contention serait fragile et
+        // structurellement incomplet. On vérifie donc l'état réel en base :
+        // si une facture correspondante existe désormais, c'est la preuve
+        // directe qu'une requête concurrente a gagné, quelle que soit la
+        // raison exacte de l'échec de notre propre tentative — jamais
+        // l'inverse : si aucune facture correspondante n'existe, l'erreur
+        // originale est relancée telle quelle (jamais de conversion
+        // arbitraire d'un timeout, d'une panne Postgres ou d'une autre
+        // erreur en 409 métier).
+        if (error instanceof Prisma.PrismaClientKnownRequestError) {
+          if (idempotencyKey) {
             const existingByKey = await tx.salesInvoice.findFirst({
               where: { enterpriseId, idempotencyKey },
               include: { sale: { include: { lines: { include: { product: true } }, customer: true } } },
@@ -210,6 +212,11 @@ export class InvoicingRepository {
             if (existingByKey) {
               return { view: this.toInvoiceView(existingByKey, existingByKey.sale), created: false };
             }
+          }
+
+          const existingBySale = await tx.salesInvoice.findUnique({ where: { saleId: sale.id } });
+          if (existingBySale) {
+            throw new ConflictException("Cette vente est déjà facturée");
           }
         }
         throw error;

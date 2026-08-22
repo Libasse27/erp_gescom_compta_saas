@@ -1266,25 +1266,40 @@ et écrit sur stdout (BIL-11).
   uniquement), même cause structurelle si le scénario s'y reproduit.
 - **Fichier(s)** : `apps/api/src/invoicing/invoicing.repository.ts:147-150,181-193`,
   `apps/api/src/invoicing/invoicing.controller.ts:59`.
-- **Solution** : intercepter tout `P2002` sur cette création, indépendamment de
-  `idempotencyKey`, et distinguer la contrainte réellement violée via
-  `error.meta.target` (vérifié empiriquement : Prisma 5.20/Postgres renvoie les noms
-  de colonnes DB, ex. `["sale_id"]`) plutôt que de présumer sa cause à partir de la
-  seule présence d'une clé.
+- **Solution** : sur tout échec Prisma (`PrismaClientKnownRequestError`) de cet
+  `INSERT`, ne jamais présumer la cause à partir du seul code d'erreur — sous
+  contention réelle, l'échec peut remonter sous plusieurs formes selon le timing
+  exact (`P2002` le plus souvent, mais aussi `P2028` en cas de timeout de la
+  transaction interactive pendant l'attente du verrou posé par le concurrent
+  gagnant — observé sur CI, jamais reproduit en local même à 8 requêtes
+  concurrentes). Vérifier plutôt l'état réel en base après l'échec : si une facture
+  correspondante (`idempotencyKey`, puis `saleId`) existe désormais, c'est la preuve
+  directe qu'une requête concurrente a gagné, quelle que soit la raison exacte de
+  l'échec ; sinon, relancer l'erreur originale telle quelle (jamais de conversion
+  arbitraire d'un timeout ou d'une panne Postgres en 409 métier).
 - **Priorité** : P2
-- **Statut** : CORRIGÉ (2026-08-22) — `catch` réécrit pour lire `error.meta.target` :
-  `sale_id` → `ConflictException("Cette vente est déjà facturée")` (que
-  `idempotencyKey` soit fourni ou non) ; `idempotency_key` → comportement idempotent
-  existant inchangé. Nouveau test d'intégration
-  (`invoicing.repository.spec.ts`, « resolves a genuine concurrent race without an
-  idempotency key... ») : deux créations réellement concurrentes (`Promise.allSettled`,
-  pas séquentielles) sur la même vente sans en-tête → exactement 1 succès + 1
-  `ConflictException`, jamais d'erreur brute, une seule facture en base. Scénario
-  idempotency-key existant (`returns the same invoice without creating a
-  duplicate...`) revérifié, toujours vert. `sales`/`purchases`/`stock`/`journal`
-  volontairement non modifiés (hors périmètre), ADR-0019 non modifiée (son mécanisme
-  reste valide, ce correctif ne fait qu'élargir la détection de la contrainte
-  distincte `sale_id`).
+- **Statut** : CORRIGÉ (2026-08-22) — première version basée sur `error.meta.target`
+  (`P2002` uniquement) validée en local mais **a échoué sur CI** : le runner, plus
+  lent/chargé, a fait remonter un `P2028` (timeout de transaction) que ce filtrage
+  ne couvrait pas. Corrigé par une vérification de l'état réel en base après tout
+  `PrismaClientKnownRequestError` (pas seulement `P2002`) : re-`findFirst` par
+  `idempotencyKey` (comportement idempotent inchangé) puis re-`findUnique` par
+  `saleId` (`ConflictException("Cette vente est déjà facturée")` uniquement si une
+  facture existe réellement) — l'erreur originale est relancée si aucune facture
+  correspondante n'est trouvée. Deux tests de non-régression :
+  `invoicing.repository.spec.ts`, « resolves a genuine concurrent race without an
+  idempotency key... » (deux créations réellement concurrentes,
+  `Promise.allSettled`, sans en-tête → exactement 1 succès + 1 `ConflictException`,
+  jamais d'erreur brute, une seule facture en base — révélateur du bug initial sur
+  CI) et « converts a simulated write error into the business 409 only because a
+  matching invoice now exists » (erreur Prisma arbitraire simulée, code sans
+  rapport avec `saleId`/`idempotencyKey`, avec une facture concurrente déjà
+  présente en base — preuve déterministe que la conversion dépend de l'état réel,
+  pas d'un pattern-matching sur un code). Scénario idempotency-key existant
+  (`returns the same invoice without creating a duplicate...`) revérifié, toujours
+  vert. `sales`/`purchases`/`stock`/`journal` volontairement non modifiés (hors
+  périmètre), ADR-0019 non modifiée (son mécanisme reste valide), aucun changement
+  à `TenantScopedPrismaService` ni aux paramètres globaux Prisma.
 
 **Note de périmètre** : `apps/api/src/invoicing/` n'était pas dans le périmètre
 initial déclaré de cet audit (ligne 5-9 ci-dessus ne couvre que les modèles Prisma
